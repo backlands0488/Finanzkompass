@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.2.0';
+  var APP_VERSION = '1.3.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -547,6 +547,7 @@
     tab: (location.hash || '').replace('#', '') || 'uebersicht',
     jahr: new Date().getFullYear(),
     filter: { monat: '', kat: '', suche: '', limit: 200 },
+    auswahl: null, // null = Auswahlmodus aus; sonst { id: true }
     szId: null
   };
   if (!TABS.some(function (t) { return t[0] === ui.tab; })) ui.tab = 'uebersicht';
@@ -771,14 +772,27 @@
       KAT.map(function (k) { return '<option value="' + k.id + '"' + (f.kat === k.id ? ' selected' : '') + '>' + esc(k.name) + '</option>'; }).join('') + '</select>' +
       '<input type="text" id="f-suche" data-filter="suche" placeholder="Suche (Name, Text, Betrag)" value="' + esc(f.suche) + '">' +
       '</div>';
-    h += '<div class="listkopf"><p class="muted small">' + liste.length + ' Buchungen · Summe ' + eur(summe, 2) + '</p>' +
-      (liste.length ? '<button class="btn small danger" data-act="loeschen-angezeigt">Angezeigte löschen (' + liste.length + ')</button>' : '') + '</div>';
+    var aw = ui.auswahl;
+    if (!aw) {
+      h += '<div class="listkopf"><p class="muted small">' + liste.length + ' Buchungen · Summe ' + eur(summe, 2) + '</p>' +
+        (liste.length ? '<div class="btns"><button class="btn small" data-act="auswahl-an">Auswählen</button><button class="btn small danger" data-act="loeschen-angezeigt">Angezeigte löschen (' + liste.length + ')</button></div>' : '') + '</div>';
+    } else {
+      var gew = liste.filter(function (b) { return aw[b.id]; }), gs = gew.reduce(function (s, b) { return s + b.betrag; }, 0);
+      h += '<div class="auswahlleiste"><div><b>' + gew.length + ' ausgewählt</b>' + (gew.length ? ' · Summe ' + eur(gs, 2) : '') + '</div><div class="btns">' +
+        (gew.length < liste.length ? '<button class="btn small" data-act="auswahl-alle">Alle ' + liste.length + ' auswählen</button>' : '') +
+        (gew.length ? '<button class="btn small" data-act="auswahl-keine">Keine</button>' : '') +
+        '<select id="auswahl-kat" aria-label="Kategorie für Auswahl setzen"' + (gew.length ? '' : ' disabled') + '><option value="">Kategorie setzen …</option>' + katOptions('', false) + '</select>' +
+        '<button class="btn small danger" data-act="auswahl-loeschen"' + (gew.length ? '' : ' disabled') + '>Ausgewählte löschen (' + gew.length + ')</button>' +
+        '<button class="btn small primary" data-act="auswahl-aus">Fertig</button></div></div>';
+    }
     if (!liste.length) return h + '<div class="card empty">Keine Buchungen für diese Auswahl.</div>';
-    h += '<div class="card" style="padding:4px 12px"><ul class="blist">';
+    h += '<div class="card" style="padding:4px 12px"><ul class="blist' + (aw ? ' waehlen' : '') + '">';
     liste.slice(0, f.limit).forEach(function (b) {
       var sj = b.steuerjahr && +b.steuerjahr !== +b.datum.slice(0, 4) ? '<span class="tag">Steuerjahr ' + b.steuerjahr + '</span>' : '';
-      h += '<li><div class="d">' + datumDE(b.datum) + '</div>' +
-        '<div class="t" data-act="bearbeiten" data-id="' + b.id + '"><div class="who">' + esc(b.gegenpartei || '–') + sj + '</div><div class="what">' + esc(b.text || b.notiz || '') + '</div></div>' +
+      var an = aw && aw[b.id];
+      h += '<li' + (an ? ' class="gewaehlt"' : '') + '><div class="d"' + (aw ? ' data-act="waehle" data-id="' + b.id + '"' : '') + '>' +
+        (aw ? '<input type="checkbox" data-act="waehle" data-id="' + b.id + '"' + (an ? ' checked' : '') + ' aria-label="Buchung auswählen">' : '') + datumDE(b.datum) + '</div>' +
+        '<div class="t" data-act="' + (aw ? 'waehle' : 'bearbeiten') + '" data-id="' + b.id + '"><div class="who">' + esc(b.gegenpartei || '–') + sj + '</div><div class="what">' + esc(b.text || b.notiz || '') + '</div></div>' +
         '<div class="s"><select data-kat="' + b.id + '" class="' + (b.kat ? '' : 'leer') + '" aria-label="Kategorie">' + katOptions(b.kat) + '</select></div>' +
         '<div class="a ' + (b.betrag < 0 ? 'neg' : 'pos') + '">' + eur(b.betrag, 2) + '</div></li>';
     });
@@ -862,7 +876,7 @@
       map: Object.assign({ datum: '', betrag: '', soll: '', haben: '', name: '', iban: '', text: '', art: '', kat: '', sj: '', auf: '', modus: 'betrag' }, D.csvMapping || {}),
       ueberschreiben: false, lernen: true };
     dlg.innerHTML = '<div class="dhead"><h2>Kontoumsätze importieren</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div>' +
-      '<div class="dbody" id="csvbody"><p>Export der apoBank (oder einer anderen Bank) auswählen: Excel (.xlsx) oder CSV. Die Spalten ordnest du im nächsten Schritt zu; die Zuordnung wird für künftige Importe gespeichert.</p>' +
+      '<div class="dbody" id="csvbody"><p>Export der apoBank (oder einer anderen Bank) auswählen: Excel (.xlsx) oder CSV. Die Spalten ordnest du im nächsten Schritt zu; die Zuordnung wird für künftige Importe gespeichert. Enthält die Datei eine Spalte „Kategorie“, „Steuerjahr“ oder „Aufteilung“, wird sie automatisch übernommen.</p><p class="muted small">App-Version ' + APP_VERSION + '</p>' +
       '<input type="file" id="csvfile" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div><div class="dfoot" id="csvfoot"><button class="btn" data-act="dlg-zu">Abbrechen</button></div>';
     dlg.showModal();
     $('#csvfile').addEventListener('change', function (e) {
@@ -1376,6 +1390,23 @@
         D.buchungen = D.buchungen.filter(function (b) { return !wegIds[b.id]; });
         save(); toast(weg.length + ' Buchungen gelöscht'); break;
       }
+      case 'auswahl-an': ui.auswahl = {}; render(); break;
+      case 'auswahl-aus': ui.auswahl = null; render(); break;
+      case 'auswahl-keine': ui.auswahl = {}; render(); break;
+      case 'auswahl-alle': buchungenGefiltert().forEach(function (b) { ui.auswahl[b.id] = true; }); render(); break;
+      case 'waehle': {
+        if (!ui.auswahl) break;
+        if (ui.auswahl[a.dataset.id]) delete ui.auswahl[a.dataset.id]; else ui.auswahl[a.dataset.id] = true;
+        render(); break;
+      }
+      case 'auswahl-loeschen': {
+        var sel = buchungenGefiltert().filter(function (b) { return ui.auswahl && ui.auswahl[b.id]; });
+        if (!sel.length) break;
+        if (!confirm(sel.length + ' ausgewählte Buchungen löschen?')) break;
+        var selIds = {}; sel.forEach(function (b) { selIds[b.id] = 1; });
+        D.buchungen = D.buchungen.filter(function (b) { return !selIds[b.id]; });
+        ui.auswahl = {}; save(); toast(sel.length + ' Buchungen gelöscht'); break;
+      }
       case 'loeschen-alle': {
         var anz = D.buchungen.length; if (!anz) break;
         if (!confirm('Wirklich alle ' + anz + ' Buchungen aller Jahre löschen?\n\nRegeln, Steuerangaben, KVN und Planung bleiben erhalten.')) break;
@@ -1457,6 +1488,11 @@
     if (el.id === 'jahr') { ui.jahr = +el.value; ui.filter.limit = 200; render(); return; }
     if (el.id === 'sz-wahl') { ui.szId = el.value; render(); return; }
     if (el.dataset.filter) { ui.filter[el.dataset.filter] = el.value; ui.filter.limit = 200; render(); return; }
+    if (el.id === 'auswahl-kat' && el.value && ui.auswahl) {
+      var gw = buchungenGefiltert().filter(function (b) { return ui.auswahl[b.id]; });
+      gw.forEach(function (b) { b.kat = el.value; });
+      save(); toast(gw.length + ' Buchungen → ' + katName(el.value)); return;
+    }
     if (el.dataset.kat) {
       var b = D.buchungen.filter(function (x) { return x.id === el.dataset.kat; })[0];
       if (!b) return;
@@ -1510,7 +1546,18 @@
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-    navigator.serviceWorker.register('sw.js').catch(function () {});
+    // Updates zuverlässig übernehmen: beim Zurückkehren in die App nach neuer Version fragen,
+    // und sobald der neue Service Worker aktiv ist, neu laden (bei offenem Dialog nur Hinweis).
+    var hatteSW = !!navigator.serviceWorker.controller, neuGeladen = false;
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') reg.update().catch(function () {}); });
+    }).catch(function () {});
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hatteSW) { hatteSW = true; return; }
+      if (neuGeladen) return;
+      if ($('#dlg').open) { toast('Neue Version verfügbar', 'Neu laden', function () { location.reload(); }); return; }
+      neuGeladen = true; location.reload();
+    });
   }
   // Test-Haken (nur für automatisierte Prüfung)
   window.__fk = { auswertung: auswertung, parseBetrag: parseBetrag, parseDatum: parseDatum, splitCSV: splitCSV, szRechne: szRechne, data: function () { return D; } };

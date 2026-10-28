@@ -226,11 +226,21 @@ input.inline { padding: 5px 6px; text-align: right; min-width: 90px; }
 .blist select { padding: 5px 6px; font-size: 13px; }
 .blist select.leer { border-color: var(--warn); background: var(--warn-soft); }
 .blist .a { text-align: right; font-variant-numeric: tabular-nums; font-weight: 550; }
+.auswahlleiste { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin: 0 0 8px; font-size: 14px; }
+.auswahlleiste .btns { margin: 0; }
+.auswahlleiste select { width: auto; max-width: 220px; padding: 5px 6px; font-size: 13px; }
+.blist.waehlen .d, .blist.waehlen .t { cursor: pointer; user-select: none; }
+.blist .d input[type=checkbox] { width: 18px; height: 18px; margin: 0 8px 0 0; vertical-align: -4px; cursor: pointer; }
+.blist li.gewaehlt { background: var(--accent-soft, var(--surface-2)); }
+.blist.waehlen li { grid-template-columns: 108px 1fr 200px 110px; }
 .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); margin-left: 6px; }
 @media (max-width: 760px) {
   .blist li { grid-template-columns: 1fr auto; grid-template-areas: "t a" "d s"; row-gap: 4px; }
   .blist .t { grid-area: t; } .blist .a { grid-area: a; } .blist .d { grid-area: d; } .blist .s { grid-area: s; }
   .blist .s select { width: 170px; }
+  .blist.waehlen li { grid-template-columns: 1fr auto; }
+  .auswahlleiste { top: 0; }
 }
 
 /* Dialog */
