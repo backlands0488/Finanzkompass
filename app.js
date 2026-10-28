@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.4.0';
+  var APP_VERSION = '1.5.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -555,11 +555,96 @@
   };
   if (!TABS.some(function (t) { return t[0] === ui.tab; })) ui.tab = 'uebersicht';
 
-  function navRendern() {
-    $('#tabs').innerHTML = TABS.map(function (t) {
-      return '<button data-tab="' + t[0] + '"' + (ui.tab === t[0] ? ' aria-current="page"' : '') + '><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICON[t[0]] + '</svg>' + t[1] + '</button>';
-    }).join('');
+  // Bereiche: Reihenfolge und Sichtbarkeit sind einstellbar. Unten (Handy) höchstens 4 + „Mehr“ (Material: 3–5 Ziele).
+  var BEREICHE = ['uebersicht', 'steuer', 'planung', 'kvn', 'buchungen'];
+  var BEREICH_NAME = { uebersicht: 'Übersicht', buchungen: 'Buchungen', steuer: 'Steuer', kvn: 'KVN', planung: 'Planung', daten: 'Einstellungen' };
+  function navOrdnung() {
+    var s = D.settings.nav;
+    if (!s || !s.order) s = D.settings.nav = { order: BEREICHE.slice(), aus: [] };
+    BEREICHE.forEach(function (id) { if (s.order.indexOf(id) < 0) s.order.push(id); });
+    s.order = s.order.filter(function (id) { return BEREICHE.indexOf(id) >= 0; });
+    // Übersicht bleibt immer sichtbar und vorn
+    s.order = ['uebersicht'].concat(s.order.filter(function (id) { return id !== 'uebersicht'; }));
+    s.aus = (s.aus || []).filter(function (id) { return id !== 'uebersicht'; });
+    return s;
   }
+  function sichtbareBereiche() { var s = navOrdnung(); return s.order.filter(function (id) { return s.aus.indexOf(id) < 0; }); }
+  function navKnopf(id, extra) {
+    return '<button data-tab="' + id + '"' + (ui.tab === id ? ' aria-current="page"' : '') + (extra || '') + '><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICON[id] + '</svg>' + BEREICH_NAME[id] + '</button>';
+  }
+  function navRendern() {
+    var vis = sichtbareBereiche();
+    var unten = vis.slice(0, 4), rest = vis.slice(4);
+    var mehrAktiv = ui.tab === 'daten' || rest.indexOf(ui.tab) >= 0 || (vis.indexOf(ui.tab) < 0 && ui.tab !== 'daten');
+    // Desktop: alle sichtbaren + Einstellungen; Handy: 4 + Mehr (per CSS gesteuert)
+    $('#tabs').innerHTML =
+      vis.map(function (id, i) { return navKnopf(id, i >= 4 ? ' class="nur-breit"' : ''); }).join('') +
+      '<button class="nur-schmal" data-act="mehr-blatt"' + (mehrAktiv ? ' aria-current="page"' : '') + '><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>Mehr</button>' +
+      '<div class="nav-trenner nur-breit"></div>' + navKnopf('daten', ' class="nur-breit"');
+    void unten;
+  }
+  function mehrBlatt() {
+    var vis = sichtbareBereiche(), rest = vis.slice(4), aus = navOrdnung().aus;
+    var dlg = $('#dlg'); dlg.className = 'blatt'; dlg.onclose = null;
+    var zeile = function (id, zusatz) { return '<button class="blattzeile" data-tab="' + id + '"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICON[id] + '</svg><span>' + BEREICH_NAME[id] + (zusatz || '') + '</span></button>'; };
+    dlg.innerHTML = '<div class="blattgriff"></div>' +
+      rest.map(function (id) { return zeile(id); }).join('') +
+      aus.map(function (id) { return zeile(id, ' <small>ausgeblendet</small>'); }).join('') +
+      zeile('daten') +
+      '<button class="blattzeile" data-act="anpassen" data-was="nav"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="7" r="2" stroke="currentColor" stroke-width="2" fill="none"/><circle cx="10" cy="17" r="2" stroke="currentColor" stroke-width="2" fill="none"/></svg><span>Leiste anpassen</span></button>';
+    dlg.showModal();
+  }
+
+  // Anpassen-Listen (Bereiche und Übersichtskarten): verschieben ↑↓, ein-/ausblenden
+  function anpassenListe(was) {
+    var s = was === 'nav' ? navOrdnung() : kartenOrdnung();
+    var name = was === 'nav' ? function (id) { return BEREICH_NAME[id]; } : function (id) { return KARTEMAP[id].n; };
+    var fest = was === 'nav' ? ['uebersicht'] : [];
+    var h = '<ul class="anpassen">';
+    s.order.forEach(function (id, i) {
+      var an = s.aus.indexOf(id) < 0, istFest = fest.indexOf(id) >= 0;
+      h += '<li class="' + (an ? '' : 'aus') + '">' +
+        '<label class="schalter"><input type="checkbox" data-anp="' + was + '" data-id="' + id + '"' + (an ? ' checked' : '') + (istFest ? ' disabled' : '') + '><i></i></label>' +
+        '<span class="anpname">' + esc(name(id)) + (was === 'nav' && an && sichtbareBereiche().indexOf(id) >= 4 ? ' <small>unter „Mehr“</small>' : '') + '</span>' +
+        '<button class="btn small" data-act="anp-hoch" data-was="' + was + '" data-id="' + id + '"' + (i === 0 || istFest || (was === 'nav' && i === 1) ? ' disabled' : '') + ' aria-label="nach oben">↑</button>' +
+        '<button class="btn small" data-act="anp-runter" data-was="' + was + '" data-id="' + id + '"' + (i === s.order.length - 1 || istFest ? ' disabled' : '') + ' aria-label="nach unten">↓</button></li>';
+    });
+    h += '</ul>';
+    if (was === 'nav') h += '<p class="muted small">Auf dem Handy erscheinen die ersten vier sichtbaren Bereiche unten, alle weiteren unter „Mehr“. Einstellungen erreichst du immer über ⚙ oben.</p>';
+    else h += '<p class="muted small">Ausgeblendete Karten kannst du hier jederzeit wieder einschalten.</p>';
+    return h;
+  }
+  function anpassenDialog(was) {
+    var dlg = $('#dlg'); dlg.className = 'blatt'; dlg.onclose = null;
+    dlg.innerHTML = '<div class="dhead"><h2>' + (was === 'nav' ? 'Leiste anpassen' : 'Übersicht anpassen') + '</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div><div class="dbody" id="anp-body">' + anpassenListe(was) + '</div>';
+    dlg.dataset.anp = was;
+    if (!dlg.open) dlg.showModal();
+  }
+  function anpassenAendern(was, id, aktion, wert) {
+    var s = was === 'nav' ? navOrdnung() : kartenOrdnung(), i = s.order.indexOf(id);
+    if (aktion === 'hoch' && i > 0) { s.order.splice(i, 1); s.order.splice(i - 1, 0, id); }
+    if (aktion === 'runter' && i < s.order.length - 1) { s.order.splice(i, 1); s.order.splice(i + 1, 0, id); }
+    if (aktion === 'an') { s.aus = s.aus.filter(function (x) { return x !== id; }); if (!wert) s.aus.push(id); }
+    save();
+    var body = $('#anp-body'); if (body && $('#dlg').open) body.innerHTML = anpassenListe(was);
+  }
+
+  // Gemeinsame Bausteine für ruhige, tabellenarme Darstellung
+  function info(text) { return '<details class="info"><summary aria-label="Erklärung" title="Erklärung">i</summary><div class="infotext">' + text + '</div></details>'; }
+  function kopf(titel, infotext) { return '<div class="khead"><h2>' + titel + '</h2>' + (infotext ? info(infotext) : '') + '</div>'; }
+  function zliste(zeilen) {
+    return '<div class="zliste">' + zeilen.filter(Boolean).map(function (z) {
+      return '<div class="zrow ' + (z[2] || '') + '"><span>' + z[0] + '</span><b>' + z[1] + '</b></div>';
+    }).join('') + '</div>';
+  }
+  function gruppeKarte(id, titel, zusammenfassung, inhalt, offen) {
+    var auf = ui.offen[id] !== undefined ? ui.offen[id] : !!offen;
+    return '<details class="mehr card" data-auf="' + id + '"' + (auf ? ' open' : '') + '><summary><span><span class="gt">' + titel + '</span>' + (zusammenfassung ? '<small>' + zusammenfassung + '</small>' : '') + '</span></summary><div class="mehrinhalt">' + inhalt + '</div></details>';
+  }
+  function feldZeile(pfad, wert, label, hilfe) {
+    return '<label class="fz"><span>' + label + (hilfe ? '<small>' + hilfe + '</small>' : '') + '</span><input type="number" step="any" inputmode="decimal" data-bind="' + pfad + '" value="' + (wert === 0 || wert ? wert : '') + '" placeholder="0"></label>';
+  }
+
   function jahreRendern() {
     var cur = new Date().getFullYear(), set = {};
     set[cur] = 1; set[cur - 1] = 1;
@@ -807,19 +892,6 @@
     return h + zielFeld + '</div>';
   }
 
-  function karteZuordnen(A) {
-    var offen = D.buchungen.filter(function (b) { return !b.kat; }).length;
-    if (offen) {
-      var min = Math.max(1, Math.round(offen * 6 / 60));
-      return '<div class="card ritualkarte"><div><div class="frage">' + offen + (offen === 1 ? ' Buchung wartet' : ' Buchungen warten') + ' auf eine Kategorie</div>' +
-        '<p class="muted small">Eine nach der anderen, mit Vorschlägen · etwa ' + min + ' Min.' + (A.unkat ? ' · Ohne Kategorie fehlen sie in Gewinn und Steuer.' : '') + '</p></div>' +
-        '<button class="btn primary" data-act="ritual">Zuordnen</button></div>';
-    }
-    var letzt = D.meta.letzterImport ? ' · letzter Import ' + new Date(D.meta.letzterImport).toLocaleDateString('de-DE') : '';
-    return '<div class="card ritualkarte still"><div><div class="frage"><span class="haken">✓</span> Alles zugeordnet</div><p class="muted small">Neue Umsätze einfach importieren' + letzt + '</p></div>' +
-      '<button class="btn" data-act="csv">Importieren</button></div>';
-  }
-
   // Was wäre, wenn …: Regler direkt im Satz, Ergebnis nach Steuer sofort
   function wennRechne(A) {
     var w = ui.wenn, hon = honorar(), AW = nz(D.settings.arbeitswochen) || 42;
@@ -877,65 +949,235 @@
     return '<div class="note install"><div>Du nutzt den Finanzkompass im Browser. <b>Als App:</b> Chrome-Menü ⋮ → „App installieren“. Ist sie schon installiert, öffne sie über ihr App-Symbol.</div><div class="btns"><button class="btn small" data-act="install-weg">Verstanden</button></div></div>';
   }
 
+  // ---------------------------------------------------------------- Übersicht: Karten (verschieb- und ausblendbar)
+  function karte(id, inhalt, breit, cls) { return '<div class="card k-' + id + (breit ? ' breit' : '') + (cls ? ' ' + cls : '') + '">' + inhalt + '</div>'; }
+
+  function karteZuordnen(A) {
+    var offen = D.buchungen.filter(function (b) { return !b.kat; }).length;
+    if (offen) {
+      var min = Math.max(1, Math.round(offen * 6 / 60));
+      return karte('zuordnen', '<div><div class="frage">' + offen + (offen === 1 ? ' Buchung wartet' : ' Buchungen warten') + ' auf eine Kategorie</div>' +
+        '<p class="muted small">Eine nach der anderen, mit Vorschlägen · etwa ' + min + ' Min.</p></div>' +
+        '<button class="btn primary" data-act="ritual">Zuordnen</button>', true, 'ritualkarte');
+    }
+    var letzt = D.meta.letzterImport ? 'Letzter Import ' + new Date(D.meta.letzterImport).toLocaleDateString('de-DE') : 'Neue Umsätze einfach importieren';
+    return karte('zuordnen', '<div><div class="frage"><span class="haken">✓</span> Alles zugeordnet</div><p class="muted small">' + letzt + '</p></div>' +
+      '<button class="btn" data-act="csv">Importieren</button>', true, 'ritualkarte still');
+  }
+
+  // Wiederkehrende Zahlungen erkennen (Abstand und Häufigkeit; ähnlich der Vertragserkennung in Finanz-Apps)
+  function wiederkehrend() {
+    var gruppen = {}, ref = null;
+    D.buchungen.forEach(function (b) { if (!ref || b.datum > ref) ref = b.datum; });
+    if (!ref) return [];
+    var refT = new Date(ref + 'T12:00:00').getTime();
+    D.buchungen.forEach(function (b) {
+      var g = gruppe(b.kat);
+      if (!b.kat || ['praxis_aus', 'vorsorge', 'praxis_ein'].indexOf(g) < 0) return;
+      var t = new Date(b.datum + 'T12:00:00').getTime();
+      if (refT - t > 400 * 864e5) return;
+      // Vorzeichen muss zur Kategorie passen (Gutschriften bei Ausgaben-Kategorien zählen nicht als Fixkosten)
+      if ((g === 'praxis_ein') !== (b.betrag > 0)) return;
+      var key = (nameKey(b) || normIBAN(b.iban)) + '|' + b.kat;
+      (gruppen[key] = gruppen[key] || []).push({ b: b, t: t });
+    });
+    var med = function (a) { var s = a.slice().sort(function (x, y) { return x - y; }); var m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+    var liste = [];
+    Object.keys(gruppen).forEach(function (key) {
+      var e = gruppen[key].sort(function (x, y) { return x.t - y.t; });
+      var monate = {}; e.forEach(function (x) { monate[x.b.datum.slice(0, 7)] = 1; });
+      if (e.length < 3 || Object.keys(monate).length < 3) return;
+      var abst = []; for (var i = 1; i < e.length; i++) abst.push((e[i].t - e[i - 1].t) / 864e5);
+      var mi = Math.max(1, med(abst));
+      var rhythmus = mi <= 20 ? 'mehrmals im Monat' : mi <= 40 ? 'monatlich' : mi <= 105 ? 'vierteljährlich' : mi <= 200 ? 'halbjährlich' : null;
+      if (!rhythmus) return;
+      // nur aktive Zahlungsströme: letzte Zahlung nicht länger als 1,5 Intervalle (mind. 45 Tage) vor dem letzten Kontostand
+      if ((refT - e[e.length - 1].t) / 864e5 > Math.max(45, mi * 1.5)) return;
+      var summe = e.reduce(function (s, x) { return s + x.b.betrag; }, 0);
+      var spanne = (e[e.length - 1].t - e[0].t) / 864e5 + Math.max(mi, 30.44);
+      var proMonat = summe / (spanne / 30.44);
+      var naechst = e[e.length - 1].t, heute = Date.now(), schritt = Math.max(mi, 28) * 864e5;
+      if (mi > 20) { do { naechst += schritt; } while (naechst < heute - 2 * 864e5); } else naechst = null;
+      var letzter = e[e.length - 1].b;
+      liste.push({ name: String(letzter.gegenpartei || letzter.iban || '').split('\n')[0].replace(/\s{2,}/g, ' '), kat: letzter.kat, gruppe: gruppe(letzter.kat),
+        rhythmus: rhythmus, proMonat: proMonat, typisch: med(e.map(function (x) { return x.b.betrag; })), naechst: naechst, n: e.length });
+    });
+    return liste.sort(function (a, b) { return Math.abs(b.proMonat) - Math.abs(a.proMonat); });
+  }
+
+  function karteFixkosten(A) {
+    var w = wiederkehrend().filter(function (x) { return x.proMonat < 0; });
+    if (!w.length) return '';
+    var praxis = w.filter(function (x) { return x.gruppe === 'praxis_aus'; }), vors = w.filter(function (x) { return x.gruppe === 'vorsorge'; });
+    var sum = function (l) { return -l.reduce(function (s, x) { return s + x.proMonat; }, 0); };
+    var gesamt = sum(w), hon = honorar();
+    var h = '<div class="frage">Fixkosten</div><div class="gross mittel">' + eur(gesamt) + ' <small>pro Monat</small></div>' +
+      '<p class="satz">' + (hon ? 'Dafür brauchst du etwa <b>' + Math.ceil(gesamt / hon) + ' Sitzungen</b> im Monat. ' : '') +
+      '<span class="muted">Praxis ' + eur(sum(praxis)) + ' · Vorsorge &amp; Versicherungen ' + eur(sum(vors)) + '</span></p>';
+    var zeile = function (x) { return '<div class="fixrow"><span><b>' + esc(x.name) + '</b><small>' + esc(katName(x.kat)) + ' · ' + x.rhythmus + '</small></span><em>' + eur(-x.proMonat) + '</em></div>'; };
+    h += '<div class="fixliste">' + w.slice(0, 5).map(zeile).join('') + '</div>';
+    if (w.length > 5) h += '<details class="weitere"><summary>' + (w.length - 5) + ' weitere</summary><div class="fixliste">' + w.slice(5).map(zeile).join('') + '</div></details>';
+    h += '<p class="muted small">Automatisch erkannt aus wiederkehrenden Zahlungen, auf den Monat umgerechnet. Jährliche Beiträge erkennt die App erst nach zwei Jahren.</p>';
+    return karte('fixkosten', h);
+  }
+
+  function karteTermine(A) {
+    if (A.Y !== new Date().getFullYear()) return '';
+    var heute = new Date(), jetzt = isoHeute(), items = [];
+    // Steuer-Vorauszahlungen: 10.3., 10.6., 10.9., 10.12. (§ 37 Abs. 1 EStG)
+    var termine = [], y = heute.getFullYear();
+    [y, y + 1].forEach(function (jj) { ['03', '06', '09', '12'].forEach(function (m) { termine.push(jj + '-' + m + '-10'); }); });
+    var nt = termine.filter(function (d) { return d >= jetzt; })[0];
+    var S = D.steuer[+nt.slice(0, 4)] || st(A.Y), vz = S && S.vz ? nz(S.vz.est) + nz(S.vz.soli) + nz(S.vz.kist) : 0;
+    items.push({ d: nt, t: 'Steuer-Vorauszahlung', s: vz ? 'ESt, Soli, KiSt' : 'Betrag: Vorauszahlungsbescheid unter Steuer eintragen', b: vz ? -vz / 4 : null, cls: 'steuer' });
+    // Erwartete Zahlungen aus wiederkehrenden Buchungen (nächste 35 Tage)
+    var grenze = Date.now() + 35 * 864e5;
+    wiederkehrend().forEach(function (x) {
+      if (!x.naechst || x.naechst > grenze) return;
+      var d = new Date(x.naechst); var iso = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+      items.push({ d: iso, t: x.name, s: 'erwartet · ' + x.rhythmus, b: x.typisch, cls: x.typisch > 0 ? 'ein' : '' });
+    });
+    // Steuertermin immer zeigen, dazu die nächsten erwarteten Zahlungen
+    var steuerI = items.shift();
+    items.sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+    items = items.slice(0, 5).concat([steuerI]).sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+    var tage = function (iso) { var n = Math.round((new Date(iso + 'T12:00:00') - new Date(jetzt + 'T12:00:00')) / 864e5); return n <= 0 ? 'heute' : n === 1 ? 'morgen' : 'in ' + n + ' Tagen'; };
+    var h = '<div class="frage">Demnächst</div><div class="termine">' + items.slice(0, 6).map(function (i) {
+      var p = i.d.split('-');
+      return '<div class="termin ' + i.cls + '"><div class="tdatum"><b>' + +p[2] + '.</b><span>' + MONATE[+p[1] - 1] + '</span></div><div class="ttext"><b>' + esc(i.t) + '</b><small>' + tage(i.d) + ' · ' + esc(i.s) + '</small></div>' +
+        (i.b !== null ? '<em class="' + (i.b > 0 ? 'pos' : '') + '">' + (i.b > 0 ? '+' : '') + eur(i.b) + '</em>' : '') + '</div>';
+    }).join('') + '</div>';
+    return karte('termine', h);
+  }
+
+  function karteMonat(A) {
+    if (!A.stichtag) return '';
+    var st0 = new Date(A.stichtag + 'T12:00:00'), letzterTag = new Date(st0.getFullYear(), st0.getMonth() + 1, 0).getDate();
+    var m = st0.getDate() >= letzterTag - 1 ? st0.getMonth() : st0.getMonth() - 1, y = st0.getFullYear();
+    if (m < 0) { m = 11; y--; }
+    var vm = m - 1, vy = y; if (vm < 0) { vm = 11; vy--; }
+    var werte = function (yy, mm) {
+      var o = { ein: 0, aus: 0, kats: {} }, pre = yy + '-' + pad(mm + 1);
+      D.buchungen.forEach(function (b) {
+        if (b.datum.slice(0, 7) !== pre) return;
+        var g = gruppe(b.kat);
+        if (g === 'praxis_ein') o.ein += b.betrag;
+        else if (g === 'praxis_aus' || g === 'praxis_inv' || g === 'vorsorge') { o.aus -= b.betrag; o.kats[b.kat] = (o.kats[b.kat] || 0) - b.betrag; }
+      });
+      o.saldo = o.ein - o.aus; return o;
+    };
+    var a = werte(y, m), v = werte(vy, vm);
+    if (!a.ein && !a.aus) return '';
+    var mName = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+    var diff = v.saldo ? (a.saldo - v.saldo) / Math.abs(v.saldo) : 0;
+    var top = Object.keys(a.kats).sort(function (x, z) { return a.kats[z] - a.kats[x]; }).slice(0, 3);
+    var max = Math.max(a.ein, a.aus, 1);
+    var h = '<div class="frage">Rückblick ' + mName[m] + '</div>' +
+      '<div class="balkenpaar"><div><span>Eingenommen</span><i style="width:' + (a.ein / max * 100).toFixed(1) + '%;background:var(--teil-bleibt)"></i><b>' + eur(a.ein) + '</b></div>' +
+      '<div><span>Ausgegeben</span><i style="width:' + (a.aus / max * 100).toFixed(1) + '%;background:var(--teil-kosten)"></i><b>' + eur(a.aus) + '</b></div></div>' +
+      '<p class="satz">Überschuss <b>' + eur(a.saldo) + '</b>' + (v.saldo ? ' <span class="' + (diff >= 0 ? 'pos' : 'muted') + '">' + (diff >= 0 ? '▲ ' : '▼ ') + Math.abs(Math.round(diff * 100)) + ' % zum ' + mName[vm] + '</span>' : '') + '</p>' +
+      (top.length ? '<p class="muted small">Größte Posten: ' + top.map(function (k) { return esc(katName(k)) + ' ' + eur(a.kats[k]); }).join(' · ') + '</p>' : '') +
+      '<p class="muted small">Praxis plus Vorsorge, ohne Steuern und Privatentnahmen.</p>';
+    return karte('monat', h);
+  }
+
+  function karteWohin(A) {
+    var sicht = ui.wohin || 'wohin';
+    var posten = [];
+    if (sicht === 'wohin') {
+      KAT.forEach(function (k) { if (['praxis_aus', 'praxis_inv', 'vorsorge'].indexOf(k.gruppe) >= 0 && A.ist[k.id] < 0) posten.push({ k: k.id, n: k.name, w: -A.ist[k.id] }); });
+      var stz = -((A.ist.st_est || 0) + (A.ist.st_soli || 0) + (A.ist.st_kist || 0)); if (stz > 0) posten.push({ k: 'g:steuer', n: 'Steuern', w: stz });
+    } else {
+      KAT.forEach(function (k) { if ((k.gruppe === 'praxis_ein' || k.id === 'lohn') && A.ist[k.id] > 0) posten.push({ k: k.id, n: k.name, w: A.ist[k.id] }); });
+    }
+    posten.sort(function (a, b) { return b.w - a.w; });
+    var summe = posten.reduce(function (s, p) { return s + p.w; }, 0);
+    if (!summe) return '';
+    if (posten.length > 7) { var rest = posten.slice(6); posten = posten.slice(0, 6); posten.push({ k: '', n: 'Weitere (' + rest.length + ')', w: rest.reduce(function (s, p) { return s + p.w; }, 0) }); }
+    var max = posten[0].w;
+    var h = '<div class="khead"><div class="frage">' + (sicht === 'wohin' ? 'Wohin geht das Geld?' : 'Woher kommt das Geld?') + '</div>' +
+      '<div class="seg klein"><button data-act="wohin" data-v="woher" aria-pressed="' + (sicht === 'woher') + '">Woher</button><button data-act="wohin" data-v="wohin" aria-pressed="' + (sicht === 'wohin') + '">Wohin</button></div></div>' +
+      '<div class="hbalken">' + posten.map(function (p) {
+        return '<button class="hb" ' + (p.k ? 'data-act="zeige-kat" data-k="' + p.k + '"' : 'disabled') + '><span class="hbname">' + esc(p.n) + '</span><span class="hbbar"><i style="width:' + (p.w / max * 100).toFixed(1) + '%;background:' + (sicht === 'wohin' ? 'var(--teil-kosten)' : 'var(--teil-bleibt)') + '"></i></span><b>' + eur(p.w) + '</b><small>' + Math.round(p.w / summe * 100) + ' %</small></button>';
+      }).join('') + '</div><p class="muted small">Ist ' + A.Y + (A.t < 1 ? ' bis ' + datumDE(A.stichtag) : '') + ' · Tippen zeigt die Buchungen.</p>';
+    return karte('wohin', h);
+  }
+
+  function karteDetails(A) {
+    var Y = A.Y;
+    var tiles = '<div class="tiles">' +
+      tile('Steuerlicher Gewinn', eur(A.P.gewinn), A.t < 1 ? 'Ist ' + eur(A.I.gewinn) : 'EÜR') +
+      tile('Steuern ' + Y, eur(A.R.gesamt), 'Ø ' + pct(A.R.durchschnitt) + ' · Grenz ' + pct(A.R.grenz, 0)) +
+      tile('Noch zu zahlen', eur(A.nochZuZahlen), 'Vorauszahlungen + Nachzahlung') +
+      tile('Rücklage pro Monat', eur(A.ruecklageMonat), A.monateRest + ' Monat(e) bis Jahresende') + '</div>';
+    var zeilen = [['<b>Betriebseinnahmen</b>', A.I.ein, A.P.ein, 'sum']];
+    katsIn('praxis_ein').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) zeilen.push([k.name, i, p, 'sub']); });
+    zeilen.push(['<b>Betriebsausgaben</b>', -A.I.aus, -A.P.aus, 'sum']);
+    katsIn('praxis_aus').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) zeilen.push([k.name, i, p, 'sub']); });
+    zeilen.push(['Abschreibungen (AfA/GWG)', -A.I.afa, -A.P.afa, 'sub']);
+    if (A.pausch) zeilen.push(['Pauschalen (nicht kontowirksam)', -A.I.pausch, -A.P.pausch, 'sub']);
+    zeilen.push(['<b>Steuerlicher Gewinn</b>', A.I.gewinn, A.P.gewinn, 'sum']);
+    zeilen.push(['Anschaffungen (Abfluss)', -A.I.inv, -A.P.inv, 'sub']);
+    zeilen.push(['<b>Cashflow-Überschuss Praxis</b>', A.I.cashflow, A.P.cashflow, 'sum']);
+    var eur2 = '<div class="zliste drei"><div class="zrow kopfz"><span></span><b>Ist</b>' + (A.t < 1 ? '<b>Prognose</b>' : '') + '</div>' + zeilen.map(function (z) {
+      return '<div class="zrow ' + z[3] + '"><span>' + z[0] + '</span><b>' + eur(z[1]) + '</b>' + (A.t < 1 ? '<b>' + eur(z[2]) + '</b>' : '') + '</div>';
+    }).join('') + '</div>';
+    var cf = zliste([
+      ['Cashflow-Überschuss Praxis', eur(A.P.cashflow)],
+      A.lohnNetto ? ['+ Lohn aus Anstellung (nach Sozialabgaben)', eur(A.lohnNetto)] : null,
+      A.partnerNetto ? ['+ Partnerin (nach Abgaben und Vorsorge)', eur(A.partnerNetto)] : null,
+      ['− Einkommensteuer, Soli, Kirchensteuer', eur(-A.R.gesamt)],
+      ['− Kranken-/Pflegeversicherung', eur(-A.vorsorgeJahr.kvpv)],
+      ['− Versorgungswerk', eur(-A.vorsorgeJahr.pvw)],
+      ['− BU, Krankentagegeld, weitere', eur(-A.vorsorgeJahr.sonstige)],
+      ['Verfügbar im Jahr', eur(A.verfuegbar), 'sum'],
+      ['Verfügbar pro Monat', eur(A.verfuegbar / 12)]
+    ]);
+    var innen = function (id, t, x) { var auf = !!ui.offen[id]; return '<details class="mehr innen" data-auf="' + id + '"' + (auf ? ' open' : '') + '><summary><span>' + t + '</span></summary><div class="mehrinhalt">' + x + '</div></details>'; };
+    return '<div class="card k-details breit"><div class="frage">Details</div>' +
+      innen('zahlen', 'Kennzahlen', tiles) + innen('monate', 'Einnahmen und Ausgaben je Monat', monatsChart(A.mon)) +
+      innen('ergebnis', 'Ergebnis (EÜR)', eur2) + innen('cashflow', 'Vom Cashflow zum verfügbaren Betrag', cf) + '</div>';
+  }
+
+  var KARTEN = [
+    { id: 'bleibt', n: 'Was bleibt mir?', f: function (A) { return karte('bleibt', antwortBleibt(A), true, 'hero'); } },
+    { id: 'steuer', n: 'Reicht meine Steuerrücklage?', f: function (A) { return karte('steuer', antwortSteuer(A)); } },
+    { id: 'kurs', n: 'Bin ich auf Kurs?', f: function (A) { return karte('kurs', antwortKurs(A)); } },
+    { id: 'termine', n: 'Demnächst (Termine)', f: karteTermine },
+    { id: 'zuordnen', n: 'Zuordnen', f: karteZuordnen },
+    { id: 'monat', n: 'Monatsrückblick', f: karteMonat },
+    { id: 'wohin', n: 'Woher und wohin', f: karteWohin },
+    { id: 'fixkosten', n: 'Fixkosten', f: karteFixkosten },
+    { id: 'wenn', n: 'Was wäre, wenn …', f: function (A) { return A.vergangen ? '' : aufklapp('wenn', 'Was wäre, wenn …', kartenWenn(A), true).replace('class="mehr card"', 'class="mehr card breit"'); } },
+    { id: 'details', n: 'Details (Kennzahlen, Monate, EÜR)', f: karteDetails }
+  ];
+  var KARTEMAP = {}; KARTEN.forEach(function (k) { KARTEMAP[k.id] = k; });
+  function kartenOrdnung() {
+    var s = D.settings.karten;
+    if (!s || !s.order) s = D.settings.karten = { order: [], aus: [] };
+    KARTEN.forEach(function (k) { if (s.order.indexOf(k.id) < 0) s.order.push(k.id); });
+    s.order = s.order.filter(function (id) { return !!KARTEMAP[id]; });
+    s.aus = s.aus || [];
+    return s;
+  }
+
   function viewUebersicht() {
     var A = auswertung(ui.jahr), Y = ui.jahr;
     var h = installHinweis() + '<h1>Übersicht ' + Y + '</h1>';
     if (!D.buchungen.length) {
-      return h + '<p class="lead">Noch keine Buchungen. Starte mit dem Import der apoBank-Umsätze (Excel oder CSV) oder lege Buchungen von Hand an.</p>' +
-        '<div class="card"><div class="btns"><button class="btn primary" data-act="csv">Kontoumsätze importieren (Excel/CSV)</button><button class="btn" data-act="neu">Buchung anlegen</button>' +
-        (hatFS ? '<button class="btn" data-act="datei-neu">Datendatei anlegen</button><button class="btn" data-act="datei-oeffnen">Vorhandene Datendatei öffnen</button>' : '<button class="btn" data-act="import-json">Datensicherung einlesen</button>') +
+      return h + '<p class="lead">Noch keine Buchungen. Starte mit dem Import der apoBank-Umsätze (Excel oder CSV).</p>' +
+        '<div class="card"><div class="btns"><button class="btn primary" data-act="csv">Kontoumsätze importieren</button><button class="btn" data-act="neu">Buchung anlegen</button>' +
+        (hatFS ? '<button class="btn" data-act="datei-oeffnen">Vorhandene Datendatei öffnen</button>' : '<button class="btn" data-act="import-json">Datensicherung einlesen</button>') +
         '</div></div>';
     }
-    var stand = A.vergangen ? 'Abgeschlossenes Jahr' : A.zukunft ? 'Planjahr ohne Ist-Daten' :
-      'Stand ' + datumDE(A.stichtag) + ' · ' + pct(A.t, 0) + ' des Jahres · Rest hochgerechnet ' + ({ linear: 'linear', sitzungen: 'über Sitzungen', manuell: 'mit Planwerten' })[D.hochrechnung.methode];
+    var stand = A.vergangen ? 'Abgeschlossenes Jahr' : A.zukunft ? 'Planjahr' : 'Stand ' + datumDE(A.stichtag) + ' · Rest des Jahres hochgerechnet';
     h += '<p class="lead">' + stand + '</p>';
-    if (fileHandle && dateiStatus === 'erlaubnis') h += '<div class="note warn"><b>Dateizugriff erneut erlauben.</b> Der Browser verlangt nach dem Neustart eine Bestätigung. <a href="#" data-act="datei-erlauben">Erlauben</a></div>';
+    if (fileHandle && dateiStatus === 'erlaubnis') h += '<div class="note warn"><b>Dateizugriff erneut erlauben.</b> <a href="#" data-act="datei-erlauben">Erlauben</a></div>';
     if (A.R.avUeberHB > 0) h += '<div class="note bad"><b>Altersvorsorge über dem Höchstbetrag:</b> ' + eur(A.R.avUeberHB) + ' wirken steuerlich nicht.</div>';
-
-    h += '<div class="antworten">' +
-      '<div class="card hero">' + antwortBleibt(A) + '</div>' +
-      '<div class="card">' + antwortSteuer(A) + '</div>' +
-      '<div class="card">' + antwortKurs(A) + '</div>' +
-      '</div>';
-    h += karteZuordnen(A);
-    if (!A.vergangen) h += aufklapp('wenn', 'Was wäre, wenn …', kartenWenn(A), true);
-
-    // Details (zweite Ebene)
-    var tiles = '<div class="tiles">' +
-      tile('Steuerlicher Gewinn', eur(A.P.gewinn), A.t < 1 ? 'Ist ' + eur(A.I.gewinn) : 'EÜR') +
-      tile('Steuern ' + Y, eur(A.R.gesamt), 'ESt, Soli, KiSt · Ø ' + pct(A.R.durchschnitt) + ' · Grenz ' + pct(A.R.grenz, 0)) +
-      tile('Noch zu zahlen', eur(A.nochZuZahlen), 'offene Vorauszahlungen + erwartete Nachzahlung') +
-      tile('Rücklage pro Monat', eur(A.ruecklageMonat), A.monateRest + ' Monat(e) bis Jahresende') +
-      '</div>';
-    h += aufklapp('zahlen', 'Kennzahlen', tiles);
-    h += aufklapp('monate', 'Einnahmen und Ausgaben je Monat', monatsChart(A.mon));
-
-    var zeile = function (n, i, p, cls) { return '<tr class="' + (cls || '') + '"><td' + (cls === 'sub' ? ' class="indent"' : '') + '>' + n + '</td><td class="num">' + eur(i) + '</td>' + (A.t < 1 ? '<td class="num">' + eur(p) + '</td>' : '') + '</tr>'; };
-    var t = '<div class="tablewrap"><table><thead><tr><th></th><th class="num">Ist</th>' + (A.t < 1 ? '<th class="num">Prognose</th>' : '') + '</tr></thead><tbody>';
-    t += zeile('<b>Betriebseinnahmen</b>', A.I.ein, A.P.ein);
-    katsIn('praxis_ein').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) t += zeile(k.name, i, p, 'sub'); });
-    t += zeile('<b>Betriebsausgaben</b>', -A.I.aus, -A.P.aus);
-    katsIn('praxis_aus').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) t += zeile(k.name, i, p, 'sub'); });
-    t += zeile('Abschreibungen (AfA/GWG)', -A.I.afa, -A.P.afa, 'sub');
-    if (A.pausch) t += zeile('Pauschalen (nicht kontowirksam)', -A.I.pausch, -A.P.pausch, 'sub');
-    t += zeile('<b>Steuerlicher Gewinn</b>', A.I.gewinn, A.P.gewinn, 'sum');
-    t += zeile('Anschaffungen (Abfluss)', -A.I.inv, -A.P.inv, 'sub');
-    t += zeile('<b>Cashflow-Überschuss Praxis</b>', A.I.cashflow, A.P.cashflow, 'sum');
-    t += '</tbody></table></div>';
-    h += aufklapp('ergebnis', 'Ergebnis (EÜR)', t);
-
-    var v = '<table><tbody>';
-    v += '<tr><td>Cashflow-Überschuss Praxis</td><td class="num">' + eur(A.P.cashflow) + '</td></tr>';
-    if (A.lohnNetto) v += '<tr><td>+ Lohn aus Anstellung (nach Sozialabgaben)</td><td class="num">' + eur(A.lohnNetto) + '</td></tr>';
-    if (A.partnerNetto) v += '<tr><td>+ Partnerin (nach Abgaben und Vorsorge)</td><td class="num">' + eur(A.partnerNetto) + '</td></tr>';
-    v += '<tr><td>− Einkommensteuer, Soli, Kirchensteuer (Jahressteuer)</td><td class="num">' + eur(-A.R.gesamt) + '</td></tr>';
-    v += '<tr><td>− Kranken-/Pflegeversicherung</td><td class="num">' + eur(-A.vorsorgeJahr.kvpv) + '</td></tr>';
-    v += '<tr><td>− Versorgungswerk</td><td class="num">' + eur(-A.vorsorgeJahr.pvw) + '</td></tr>';
-    v += '<tr><td>− BU, Krankentagegeld, weitere Versicherungen</td><td class="num">' + eur(-A.vorsorgeJahr.sonstige) + '</td></tr>';
-    v += '<tr class="sum"><td>Verfügbar im Jahr</td><td class="num">' + eur(A.verfuegbar) + '</td></tr>';
-    v += '<tr><td>Verfügbar pro Monat</td><td class="num">' + eur(A.verfuegbar / 12) + '</td></tr>';
-    v += '</tbody></table>';
-    h += aufklapp('cashflow', 'Vom Cashflow zum verfügbaren Betrag', v);
+    var s = kartenOrdnung(), inhalt = '';
+    s.order.forEach(function (id) { if (s.aus.indexOf(id) < 0) inhalt += KARTEMAP[id].f(A) || ''; });
+    h += '<div class="antworten">' + inhalt + '</div>';
+    h += '<div class="anpassenlink"><button class="btn small" data-act="anpassen" data-was="karten">Übersicht anpassen</button></div>';
     if (!A.unkat && D.buchungen.length) meilenstein('zugeordnet-' + (D.meta.letzterImport || 'start'), 'Alles zugeordnet. Die Zahlen sind vollständig.');
     return h;
   }
@@ -1287,252 +1529,247 @@
   }
 
   // ---------------------------------------------------------------- Ansicht: Steuer
+  // Ergebnis zuerst, Eingaben in aufklappbaren Gruppen mit Ein-Zeilen-Zusammenfassung, Erklärungen hinter „i“.
   function viewSteuer() {
-    var Y = ui.jahr, A = auswertung(Y), R = A.R, S = st(Y), p = 'steuer.' + Y;
-    var h = '<h1>Steuer ' + Y + '</h1><p class="lead">Voraussichtliche Einkommensteuer, Soli und Kirchensteuer auf Basis der Prognose' + (R.parameter.fortgeschrieben ? ' · Tarif 2026 mit ' + pct(D.settings.inflation) + ' p. a. fortgeschrieben' : (Y < 2026 ? ' · Tarif 2026 als Näherung' : ' · Tarif 2026 (§ 32a EStG)')) + '.</p>';
+    var Y = ui.jahr, A = auswertung(Y), R = A.R, S = st(Y), p = 'steuer.' + Y, Pa = R.personen[0];
+    var tarifInfo = R.parameter.fortgeschrieben ? 'Tarif 2026 mit ' + pct(D.settings.inflation) + ' p. a. fortgeschrieben.' : (Y < 2026 ? 'Tarif 2026 als Näherung.' : 'Tarif 2026 (§ 32a EStG).');
+    var h = '<h1>Steuer ' + Y + '</h1>';
+    var lohnAbzug = nz(S.lohn.lohnsteuer) + nz(S.lohn.soli) + nz(S.lohn.kist) + (S.zusammen ? nz(S.partner.lohn.lohnsteuer) + nz(S.partner.lohn.soli) + nz(S.partner.lohn.kist) : 0);
+    var bezahlt = A.bezahlt.est + A.bezahlt.soli + A.bezahlt.kist;
+    var vzOffen = A.vzOffen.est + A.vzOffen.soli + A.vzOffen.kist;
 
     // Ergebnis
-    var r = function (n, w, cls) { return '<tr class="' + (cls || '') + '"><td' + (cls === 'sub' ? ' class="indent"' : '') + '>' + n + '</td><td class="num">' + w + '</td></tr>'; };
-    var t = '<table><tbody>';
-    var Pa = R.personen[0];
-    t += r('Einkünfte selbständige Arbeit (Gewinn)', eur(Pa.einkuenfte18));
-    if (Pa.einkuenfte19) t += r('Einkünfte nichtselbständige Arbeit', eur(Pa.einkuenfte19), 'sub');
-    if (R.zusammen) t += r('Einkünfte Partnerin', eur(R.personen[1].summe), 'sub');
-    t += r('Summe der Einkünfte', eur(R.summeEinkuenfte), 'sum');
-    t += r('− Altersvorsorge (abziehbar)', eur(-R.avAbzug), 'sub');
-    t += r('− Kranken-/Pflegeversicherung (Basis)', eur(-R.basisKVPV), 'sub');
-    if (R.sonstigeWirksam) t += r('− weitere Vorsorge (im Höchstbetrag)', eur(-R.sonstigeWirksam), 'sub');
-    t += r('− Kirchensteuer / Sonderausgaben-Pauschbetrag', eur(-R.saUebrige), 'sub');
-    t += r('Zu versteuerndes Einkommen', eur(R.zvE), 'sum');
-    t += r('Einkommensteuer' + (R.zusammen ? ' (Splitting)' : ''), eur(R.est));
-    t += r('Solidaritätszuschlag', eur(R.soli, 2));
-    t += r('Kirchensteuer (' + pct(D.settings.kistSatz, 0) + ')', eur(R.kist, 2));
-    t += r('Steuern gesamt', eur(R.gesamt), 'sum');
-    t += r('Durchschnittssatz / Grenzsteuersatz', pct(R.durchschnitt) + ' / ' + pct(R.grenz));
-    t += '</tbody></table>';
-    var anr = '<table><tbody>';
-    anr += r('Einbehaltene Lohnsteuer, Soli, KiSt', eur(nz(S.lohn.lohnsteuer) + nz(S.lohn.soli) + nz(S.lohn.kist) + (S.zusammen ? nz(S.partner.lohn.lohnsteuer) + nz(S.partner.lohn.soli) + nz(S.partner.lohn.kist) : 0)));
-    anr += r('Vorauszahlungen bezahlt', eur(A.bezahlt.est + A.bezahlt.soli + A.bezahlt.kist));
-    anr += r('Vorauszahlungen noch fällig (laut Bescheid)', eur(A.vzOffen.est + A.vzOffen.soli + A.vzOffen.kist));
-    anr += r(R.offenGesamt >= 0 ? 'Erwartete Nachzahlung' : 'Erwartete Erstattung', eur(Math.abs(R.offenGesamt)), 'sum');
-    anr += '</tbody></table>';
-    h += '<div class="grid two"><div class="card"><h2>Berechnung</h2>' + t + '</div><div class="card"><h2>Abgleich mit Vorauszahlungen</h2>' + anr +
-      '<div class="tiles" style="margin-top:14px">' + tile('Noch zu zahlen', eur(A.nochZuZahlen)) + tile('Rücklage pro Monat', eur(A.ruecklageMonat), A.monateRest + ' Monat(e)') + '</div>' +
-      (R.avUeberHB > 0 ? '<div class="note bad"><b>Höchstbetrag Altersvorsorge überschritten:</b> ' + eur(R.avUeberHB) + ' über ' + eur(R.hbAV) + '.</div>' : '<p class="muted small">Altersvorsorge ' + eur(R.avGesamt) + ' von ' + eur(R.hbAV) + ' Höchstbetrag genutzt.</p>') +
-      '</div></div>';
+    h += '<div class="card hero">' + kopf('Voraussichtlich', 'Einkommensteuer, Solidaritätszuschlag und Kirchensteuer auf Basis deiner Hochrechnung. ' + tarifInfo + ' Orientierungsrechnung, keine Steuerberatung; Kapitalerträge sind nicht enthalten.') +
+      '<div class="gross">' + eur(R.gesamt) + '</div>' +
+      '<div class="pills"><span>Ø-Satz <b>' + pct(R.durchschnitt, 0) + '</b></span><span>Grenzsatz <b>' + pct(R.grenz, 0) + '</b></span><span>zvE <b>' + eur(R.zvE) + '</b></span></div>' +
+      '<div class="stats">' +
+      '<div><small>Bezahlt</small><b>' + eur(bezahlt + lohnAbzug) + '</b></div>' +
+      '<div><small>Noch fällig (Bescheid)</small><b>' + eur(vzOffen) + '</b></div>' +
+      '<div><small>' + (R.offenGesamt >= 0 ? 'Nachzahlung' : 'Erstattung') + '</small><b class="' + (R.offenGesamt < 0 ? 'pos' : '') + '">' + eur(Math.abs(R.offenGesamt)) + '</b></div></div>' +
+      (A.nochZuZahlen > 0 && !A.vergangen ? '<p class="satz">Leg bis Jahresende <b>' + eur(A.ruecklageMonat) + ' pro Monat</b> zurück.</p>' : '') +
+      (R.avUeberHB > 0 ? '<div class="note bad"><b>Höchstbetrag Altersvorsorge überschritten:</b> ' + eur(R.avUeberHB) + ' über ' + eur(R.hbAV) + '.</div>' : '') + '</div>';
 
-    // Einstellungen
-    h += '<div class="card"><h2>Veranlagung und Merkmale</h2>' +
-      '<div class="seg" style="margin-bottom:10px"><button data-act="set" data-path="' + p + '.zusammen" data-v="false" aria-pressed="' + !S.zusammen + '">Einzelveranlagung</button><button data-act="set" data-path="' + p + '.zusammen" data-v="true" aria-pressed="' + !!S.zusammen + '">Zusammenveranlagung</button></div>' +
+    // So entsteht die Steuer
+    var rechnung = zliste([
+      ['Gewinn aus der Praxis', eur(Pa.einkuenfte18)],
+      Pa.einkuenfte19 ? ['+ Einkünfte aus Anstellung', eur(Pa.einkuenfte19)] : null,
+      R.zusammen ? ['+ Einkünfte Partnerin', eur(R.personen[1].summe)] : null,
+      ['− Altersvorsorge', eur(-R.avAbzug)],
+      ['− Kranken-/Pflegeversicherung', eur(-R.basisKVPV)],
+      R.sonstigeWirksam ? ['− weitere Vorsorge', eur(-R.sonstigeWirksam)] : null,
+      ['− Kirchensteuer, Pauschbetrag', eur(-R.saUebrige)],
+      ['Zu versteuerndes Einkommen', eur(R.zvE), 'sum'],
+      ['Einkommensteuer' + (R.zusammen ? ' (Splitting)' : ''), eur(R.est)],
+      ['Solidaritätszuschlag', eur(R.soli)],
+      ['Kirchensteuer (' + pct(D.settings.kistSatz, 0) + ')', eur(R.kist)],
+      ['Steuern gesamt', eur(R.gesamt), 'sum']
+    ]) + '<p class="muted small">Altersvorsorge ' + eur(R.avGesamt) + ' von ' + eur(R.hbAV) + ' Höchstbetrag genutzt.</p>';
+    h += gruppeKarte('st-rechnung', 'So entsteht die Steuer', 'zu versteuern ' + eur(R.zvE), rechnung);
+
+    // Veranlagung
+    var ver = '<div class="seg" style="margin-bottom:10px"><button data-act="set" data-path="' + p + '.zusammen" data-v="false" aria-pressed="' + !S.zusammen + '">Einzeln</button><button data-act="set" data-path="' + p + '.zusammen" data-v="true" aria-pressed="' + !!S.zusammen + '">Zusammen</button></div>' +
       '<label class="check"><input type="checkbox" data-bindcheck="' + p + '.kistA"' + (S.kistA ? ' checked' : '') + '> Kirchensteuerpflichtig (ich)</label>' +
       (S.zusammen ? '<label class="check"><input type="checkbox" data-bindcheck="' + p + '.kistB"' + (S.kistB ? ' checked' : '') + '> Kirchensteuerpflichtig (Partnerin)</label>' : '') +
-      '<label class="check"><input type="checkbox" data-bindcheck="' + p + '.kvMitKrankengeld"' + (S.kvMitKrankengeld ? ' checked' : '') + '> Eigene GKV mit Krankengeldanspruch (4 %-Kürzung)</label>' +
-      '<label class="f" style="max-width:360px"><span>Höchstbetrag sonstige Vorsorge</span><select data-bind="' + p + '.agZuschussKV"><option value="auto"' + (S.agZuschussKV === 'auto' ? ' selected' : '') + '>automatisch (1.900 € bei Anstellung, sonst 2.800 €)</option><option value="ja"' + (S.agZuschussKV === 'ja' ? ' selected' : '') + '>1.900 € (AG-Zuschuss zur KV im Jahr)</option><option value="nein"' + (S.agZuschussKV === 'nein' ? ' selected' : '') + '>2.800 € (KV vollständig selbst getragen)</option></select></label>' +
-      '</div>';
+      '<label class="check"><input type="checkbox" data-bindcheck="' + p + '.kvMitKrankengeld"' + (S.kvMitKrankengeld ? ' checked' : '') + '> Eigene GKV mit Krankengeldanspruch</label>' +
+      '<label class="f" style="max-width:360px"><span>Höchstbetrag sonstige Vorsorge ' + info('Mit Arbeitgeberzuschuss zur Krankenversicherung gilt 1.900 €, sonst 2.800 €. „Automatisch“ nimmt 1.900 €, sobald Lohn eingetragen ist.') + '</span><select data-bind="' + p + '.agZuschussKV"><option value="auto"' + (S.agZuschussKV === 'auto' ? ' selected' : '') + '>automatisch</option><option value="ja"' + (S.agZuschussKV === 'ja' ? ' selected' : '') + '>1.900 € (mit AG-Zuschuss)</option><option value="nein"' + (S.agZuschussKV === 'nein' ? ' selected' : '') + '>2.800 € (selbst getragen)</option></select></label>';
+    h += gruppeKarte('st-veranlagung', 'Veranlagung', (S.zusammen ? 'Zusammen' : 'Einzeln') + ' · Kirchensteuer ' + (S.kistA ? 'ja' : 'nein'), ver);
 
     // Anstellung
-    var L = S.lohn;
     var lohnFelder = function (pp, LL) {
-      return '<div class="row">' + zahlFeld(pp + '.brutto', LL.brutto, 'Bruttoarbeitslohn') + zahlFeld(pp + '.werbungskosten', LL.werbungskosten, 'Werbungskosten', 'leer = Pauschbetrag 1.230 €') + '</div>' +
-        '<div class="row">' + zahlFeld(pp + '.rvAN', LL.rvAN, 'Rentenversicherung AN') + zahlFeld(pp + '.rvAG', LL.rvAG, 'Rentenversicherung AG') + zahlFeld(pp + '.avAN', LL.avAN, 'Arbeitslosenversicherung AN') + '</div>' +
-        '<div class="row">' + zahlFeld(pp + '.kvAN', LL.kvAN, 'Krankenversicherung AN') + zahlFeld(pp + '.pvAN', LL.pvAN, 'Pflegeversicherung AN') + '</div>' +
-        '<div class="row">' + zahlFeld(pp + '.lohnsteuer', LL.lohnsteuer, 'Einbehaltene Lohnsteuer') + zahlFeld(pp + '.soli', LL.soli, 'Einbehaltener Soli') + zahlFeld(pp + '.kist', LL.kist, 'Einbehaltene Kirchensteuer') + '</div>';
+      return '<div class="fzgruppe">' + feldZeile(pp + '.brutto', LL.brutto, 'Bruttoarbeitslohn') + feldZeile(pp + '.werbungskosten', LL.werbungskosten, 'Werbungskosten', 'leer = 1.230 € Pauschbetrag') +
+        feldZeile(pp + '.rvAN', LL.rvAN, 'Rentenversicherung AN') + feldZeile(pp + '.rvAG', LL.rvAG, 'Rentenversicherung AG') + feldZeile(pp + '.avAN', LL.avAN, 'Arbeitslosenversicherung AN') +
+        feldZeile(pp + '.kvAN', LL.kvAN, 'Krankenversicherung AN') + feldZeile(pp + '.pvAN', LL.pvAN, 'Pflegeversicherung AN') +
+        feldZeile(pp + '.lohnsteuer', LL.lohnsteuer, 'Lohnsteuer (einbehalten)') + feldZeile(pp + '.soli', LL.soli, 'Soli (einbehalten)') + feldZeile(pp + '.kist', LL.kist, 'Kirchensteuer (einbehalten)') + '</div>';
     };
-    h += '<div class="card"><h2>Einkünfte aus Anstellung</h2><p class="muted small">Werte aus der Lohnsteuerbescheinigung (z. B. Anstellung Jan–März 2026).</p>' + lohnFelder(p + '.lohn', L) + '</div>';
-
+    var L = S.lohn;
+    h += gruppeKarte('st-anstellung', 'Anstellung ' + info('Werte aus der Lohnsteuerbescheinigung, z. B. für eine Anstellung im Jahr.'), nz(L.brutto) ? eur(L.brutto) + ' brutto · ' + eur(nz(L.lohnsteuer)) + ' Lohnsteuer' : 'keine Angaben', lohnFelder(p + '.lohn', L));
     if (S.zusammen) {
       var PB = S.partner;
-      h += '<div class="card"><h2>Partnerin (Zusammenveranlagung)</h2>' + lohnFelder(p + '.partner.lohn', PB.lohn) +
-        '<div class="row">' + zahlFeld(p + '.partner.gewinn', PB.gewinn, 'Gewinn aus selbständiger Arbeit') + zahlFeld(p + '.partner.sonstigeEinkuenfte', PB.sonstigeEinkuenfte, 'Sonstige Einkünfte') + '</div>' +
-        '<div class="row">' + zahlFeld(p + '.partner.vorsorge.pvw', PB.vorsorge.pvw, 'Eigene Altersvorsorge (Basis)') + zahlFeld(p + '.partner.vorsorge.kvBasis', PB.vorsorge.kvBasis, 'Eigene KV (Basis, selbst gezahlt)') + zahlFeld(p + '.partner.vorsorge.pvBasis', PB.vorsorge.pvBasis, 'Eigene PV (selbst gezahlt)') + '</div>' +
-        '<div class="row">' + zahlFeld(p + '.partner.vorsorge.sonstige', PB.vorsorge.sonstige, 'Weitere Versicherungen') + zahlFeld(p + '.partner.kistGezahlt', PB.kistGezahlt, 'Gezahlte Kirchensteuer (außer Lohnabzug)') + '</div></div>';
+      h += gruppeKarte('st-partner', 'Partnerin', eur(nz(PB.lohn.brutto) + nz(PB.gewinn) + nz(PB.sonstigeEinkuenfte)) + ' Einkünfte', lohnFelder(p + '.partner.lohn', PB.lohn) +
+        '<div class="fzgruppe">' + feldZeile(p + '.partner.gewinn', PB.gewinn, 'Gewinn selbständige Arbeit') + feldZeile(p + '.partner.sonstigeEinkuenfte', PB.sonstigeEinkuenfte, 'Sonstige Einkünfte') +
+        feldZeile(p + '.partner.vorsorge.pvw', PB.vorsorge.pvw, 'Eigene Altersvorsorge') + feldZeile(p + '.partner.vorsorge.kvBasis', PB.vorsorge.kvBasis, 'Eigene KV (Basis)') + feldZeile(p + '.partner.vorsorge.pvBasis', PB.vorsorge.pvBasis, 'Eigene PV') +
+        feldZeile(p + '.partner.vorsorge.sonstige', PB.vorsorge.sonstige, 'Weitere Versicherungen') + feldZeile(p + '.partner.kistGezahlt', PB.kistGezahlt, 'Gezahlte Kirchensteuer') + '</div>');
     }
 
-    // Vorauszahlungen + Steuerbuchungen
+    // Vorauszahlungsbescheid
+    var vzSum = nz(S.vz.est) + nz(S.vz.soli) + nz(S.vz.kist);
+    h += gruppeKarte('st-vz', 'Vorauszahlungsbescheid ' + info('Jahressummen laut Bescheid für ' + Y + '. Fällig je ein Viertel am 10. März, Juni, September und Dezember (§ 37 EStG). Was schon bezahlt ist, liest die App aus den Buchungen.'),
+      vzSum ? eur(vzSum) + ' im Jahr · ' + eur(vzSum / 4) + ' je Quartal' : 'noch nicht eingetragen',
+      '<div class="fzgruppe">' + feldZeile(p + '.vz.est', S.vz.est, 'Einkommensteuer (Jahr)') + feldZeile(p + '.vz.soli', S.vz.soli, 'Soli (Jahr)') + feldZeile(p + '.vz.kist', S.vz.kist, 'Kirchensteuer (Jahr)') + '</div>');
+
+    // Steuerzahlungen
     var stb = D.buchungen.filter(function (b) { return gruppe(b.kat) === 'steuer' && (jahrVon(b) === Y || +b.datum.slice(0, 4) === Y); })
       .sort(function (a, b) { return a.datum < b.datum ? -1 : 1; });
-    h += '<div class="card"><h2>Vorauszahlungen</h2><p class="muted small">Jahressummen laut Vorauszahlungsbescheid für ' + Y + '. Bezahlte Beträge kommen aus den Buchungen der Kategorien Einkommensteuer, Soli und Kirchensteuer mit Steuerjahr ' + Y + '.</p>' +
-      '<div class="row">' + zahlFeld(p + '.vz.est', S.vz.est, 'Einkommensteuer (Jahr)') + zahlFeld(p + '.vz.soli', S.vz.soli, 'Soli (Jahr)') + zahlFeld(p + '.vz.kist', S.vz.kist, 'Kirchensteuer (Jahr)') + '</div>';
     if (stb.length) {
-      h += '<h3>Steuerbuchungen – Steuerjahr prüfen</h3><div class="tablewrap"><table><thead><tr><th>Datum</th><th>Kategorie</th><th class="num">Betrag</th><th>Steuerjahr</th></tr></thead><tbody>' +
-        stb.map(function (b) { var sj = jahrVon(b); return '<tr><td>' + datumDE(b.datum) + '</td><td>' + esc(katName(b.kat)) + '</td><td class="num">' + eur(b.betrag, 2) + '</td><td><select data-sj="' + b.id + '">' + [sj - 1, sj, sj + 1].filter(function (x, i, a) { return a.indexOf(x) === i; }).concat([+b.datum.slice(0, 4) - 1, +b.datum.slice(0, 4)]).filter(function (x, i, a) { return a.indexOf(x) === i; }).sort().map(function (y) { return '<option' + (y === sj ? ' selected' : '') + '>' + y + '</option>'; }).join('') + '</select></td></tr>'; }).join('') +
-        '</tbody></table></div>';
+      var zl = '<div class="zahlungen">' + stb.map(function (b) {
+        var sj = jahrVon(b), opts = [sj - 1, sj, sj + 1, +b.datum.slice(0, 4) - 1, +b.datum.slice(0, 4)].filter(function (x, i, a) { return a.indexOf(x) === i; }).sort();
+        return '<div class="zahlung"><span><b>' + eur(-b.betrag) + '</b><small>' + datumDE(b.datum) + ' · ' + esc(katName(b.kat)) + '</small></span>' +
+          '<label>für <select data-sj="' + b.id + '">' + opts.map(function (y) { return '<option' + (y === sj ? ' selected' : '') + '>' + y + '</option>'; }).join('') + '</select></label></div>';
+      }).join('') + '</div>';
+      h += gruppeKarte('st-zahlungen', 'Steuerzahlungen ' + info('Prüfe, für welches Jahr eine Zahlung gilt, z. B. eine Nachzahlung für das Vorjahr.'), stb.length + ' Zahlungen · ' + eur(bezahlt) + ' für ' + Y, zl);
     }
-    h += '</div>';
 
-    // Vorsorge
-    var VK = [['kvpv', 'Kranken-/Pflegeversicherung'], ['pvw', 'Versorgungswerk'], ['bu', 'Berufsunfähigkeitsversicherung'], ['ktg', 'Krankentagegeld'], ['vers_sonst', 'Weitere Versicherungen']];
-    h += '<div class="card"><h2>Private Vorsorge</h2><div class="tablewrap"><table><thead><tr><th></th><th class="num">Ist (Konto)</th><th class="num">Jahreswert</th></tr></thead><tbody>' +
-      VK.map(function (k) { return '<tr><td>' + k[1] + '</td><td class="num">' + eur(-(A.ist[k[0]] || 0)) + '</td><td class="num">' + eur(A.P.vorsorge[k[0]]) + '</td></tr>'; }).join('') +
-      '</tbody></table></div><h3>Zusätzlich, nicht über das Praxiskonto gezahlt (Jahr)</h3><div class="row">' +
-      zahlFeld(p + '.extra.kvpv', S.extra.kvpv, 'KV/PV') + zahlFeld(p + '.extra.pvw', S.extra.pvw, 'Versorgungswerk') + zahlFeld(p + '.extra.sonstige', S.extra.sonstige, 'Weitere Versicherungen') + '</div>' +
-      '<p class="muted small">Basis-KV/PV ist voll abziehbar und schöpft den Höchstbetrag für sonstige Vorsorge (' + eur(R.hbSonst) + ') meist aus; BU, Krankentagegeld und Haftpflicht wirken dann steuerlich nicht.</p></div>';
+    // Private Vorsorge
+    var VK = [['kvpv', 'Kranken-/Pflegeversicherung'], ['pvw', 'Versorgungswerk'], ['bu', 'Berufsunfähigkeit'], ['ktg', 'Krankentagegeld'], ['vers_sonst', 'Weitere Versicherungen']];
+    var vors = zliste(VK.filter(function (k) { return A.P.vorsorge[k[0]] || A.ist[k[0]]; }).map(function (k) { return [k[1], eur(A.P.vorsorge[k[0]]) + ' <small>Jahr</small>']; })) +
+      '<h3>Zusätzlich, nicht über das Praxiskonto</h3><div class="fzgruppe">' + feldZeile(p + '.extra.kvpv', S.extra.kvpv, 'KV/PV (Jahr)') + feldZeile(p + '.extra.pvw', S.extra.pvw, 'Versorgungswerk (Jahr)') + feldZeile(p + '.extra.sonstige', S.extra.sonstige, 'Weitere Versicherungen (Jahr)') + '</div>';
+    h += gruppeKarte('st-vorsorge', 'Vorsorge ' + info('Basis-Kranken- und Pflegeversicherung sind voll abziehbar und schöpfen den Höchstbetrag für sonstige Vorsorge (' + eur(R.hbSonst) + ') meist aus. BU, Krankentagegeld und Haftpflicht wirken dann steuerlich nicht.'),
+      eur(A.vorsorgeJahr.gesamt) + ' im Jahr', vors);
 
-    // Anlagen
-    h += '<div class="card"><h2>Anlagegüter (AfA/GWG)</h2><p class="muted small">Anschaffungen über 952 € brutto (800 € netto) werden über die Nutzungsdauer abgeschrieben; darunter sofort als GWG. Die Zahlung selbst buchst du in der Kategorie „Anschaffung“.</p>';
-    if (D.anlagen.length) {
-      h += '<div class="tablewrap"><table><thead><tr><th>Bezeichnung</th><th>Datum</th><th class="num">Kosten</th><th class="num">Nutzungsdauer</th><th class="num">AfA ' + Y + '</th><th></th></tr></thead><tbody>' +
-        D.anlagen.map(function (a) { return '<tr><td>' + esc(a.name) + '</td><td>' + datumDE(a.datum) + '</td><td class="num">' + eur(a.kosten, 2) + '</td><td class="num">' + (a.gwg ? 'GWG' : a.nd + ' J.') + '</td><td class="num">' + eur(afaFuer(a, Y), 2) + '</td><td><button class="btn small danger" data-act="anlage-weg" data-id="' + a.id + '">Entfernen</button></td></tr>'; }).join('') +
-        '</tbody></table></div>';
-    }
-    h += '<div class="row" style="margin-top:10px"><label class="f"><span>Bezeichnung</span><input type="text" id="an-name"></label><label class="f"><span>Anschaffungsdatum</span><input type="date" id="an-datum" value="' + isoHeute() + '"></label>' +
+    // Anlagegüter
+    var afaJ = D.anlagen.reduce(function (s, a) { return s + afaFuer(a, Y); }, 0);
+    var an = (D.anlagen.length ? '<div class="zahlungen">' + D.anlagen.map(function (a) {
+      return '<div class="zahlung"><span><b>' + esc(a.name) + '</b><small>' + datumDE(a.datum) + ' · ' + eur(a.kosten) + ' · ' + (a.gwg ? 'GWG' : a.nd + ' Jahre') + ' · AfA ' + Y + ': ' + eur(afaFuer(a, Y)) + '</small></span><button class="btn small danger" data-act="anlage-weg" data-id="' + a.id + '" aria-label="Entfernen">×</button></div>';
+    }).join('') + '</div>' : '') +
+      '<div class="row" style="margin-top:10px"><label class="f"><span>Bezeichnung</span><input type="text" id="an-name"></label><label class="f"><span>Datum</span><input type="date" id="an-datum" value="' + isoHeute() + '"></label>' +
       '<label class="f"><span>Kosten brutto</span><input type="number" step="0.01" id="an-kosten"></label><label class="f"><span>Nutzungsdauer (Jahre)</span><input type="number" id="an-nd" value="3"></label></div>' +
-      '<div class="btns"><button class="btn" data-act="anlage-neu">Anlagegut hinzufügen</button></div></div>';
+      '<div class="btns"><button class="btn" data-act="anlage-neu">Hinzufügen</button></div>';
+    h += gruppeKarte('st-anlagen', 'Anlagegüter ' + info('Über 952 € brutto (800 € netto) wird über die Nutzungsdauer abgeschrieben, darunter sofort als geringwertiges Wirtschaftsgut. Die Zahlung selbst buchst du in der Kategorie „Anschaffung“.'),
+      D.anlagen.length ? D.anlagen.length + ' · AfA ' + Y + ': ' + eur(afaJ) : 'keine', an);
 
     // Pauschalen
     var pl = D.pauschalen.filter(function (x) { return +x.jahr === Y; });
-    h += '<div class="card"><h2>Nicht kontowirksame Betriebsausgaben ' + Y + '</h2><p class="muted small">Z. B. km-Pauschale (0,30 €/km), Verpflegungsmehraufwand bei Fortbildungen.</p>';
-    if (pl.length) h += '<table><tbody>' + pl.map(function (x) { return '<tr><td>' + esc(x.name) + '</td><td class="num">' + eur(x.betrag, 2) + '</td><td style="width:1%"><button class="btn small danger" data-act="pausch-weg" data-id="' + x.id + '">Entfernen</button></td></tr>'; }).join('') + '</tbody></table>';
-    h += '<div class="row" style="margin-top:10px"><label class="f"><span>Bezeichnung</span><input type="text" id="pa-name"></label><label class="f"><span>Betrag</span><input type="number" step="0.01" id="pa-betrag"></label></div>' +
-      '<div class="btns"><button class="btn" data-act="pausch-neu">Hinzufügen</button></div></div>';
-
-    h += '<p class="muted small">Orientierungsrechnung nach § 32a EStG (2026), SolZG und § 10 EStG; ersetzt keine Steuerberatung. Kapitalerträge (Abgeltungsteuer) sind hier nicht enthalten.</p>';
+    var pls = pl.reduce(function (s, x) { return s + nz(x.betrag); }, 0);
+    h += gruppeKarte('st-pausch', 'Ausgaben ohne Kontobewegung ' + info('Z. B. Kilometerpauschale (0,30 €/km) oder Verpflegungsmehraufwand bei Fortbildungen.'), pl.length ? pl.length + ' · ' + eur(pls) : 'keine',
+      (pl.length ? '<div class="zahlungen">' + pl.map(function (x) { return '<div class="zahlung"><span><b>' + eur(x.betrag) + '</b><small>' + esc(x.name) + '</small></span><button class="btn small danger" data-act="pausch-weg" data-id="' + x.id + '" aria-label="Entfernen">×</button></div>'; }).join('') + '</div>' : '') +
+      '<div class="row" style="margin-top:10px"><label class="f"><span>Bezeichnung</span><input type="text" id="pa-name"></label><label class="f"><span>Betrag</span><input type="number" step="0.01" id="pa-betrag"></label></div><div class="btns"><button class="btn" data-act="pausch-neu">Hinzufügen</button></div>');
     return h;
   }
 
   // ---------------------------------------------------------------- Ansicht: KVN
   function viewKVN() {
-    var Y = ui.jahr;
-    var zufluss = [0, 0, 0, 0];
+    var Y = ui.jahr, zufluss = [0, 0, 0, 0];
     D.buchungen.forEach(function (b) { if (b.kat === 'kvn' && +b.datum.slice(0, 4) === Y) zufluss[Math.floor((+b.datum.slice(5, 7) - 1) / 3)] += b.betrag; });
-    var h = '<h1>KVN-Honorar ' + Y + '</h1><p class="lead">Zwei Sichten: Leistungsquartal (Honorarbescheid, brutto) und Zahlungseingang (Konto, netto). Für die Steuer zählt der Zahlungseingang.</p>';
-    var t = '<div class="tablewrap"><table><thead><tr><th>Quartal</th><th class="num">Honorar brutto (Bescheid)</th><th class="num">Verwaltungskosten</th><th class="num">Sonstige Abzüge/Erstattungen</th><th class="num">Netto Leistung</th><th class="num">Zufluss im Quartal</th></tr></thead><tbody>';
-    var sb = 0, sv = 0, ss = 0, sz = 0;
-    for (var q = 1; q <= 4; q++) {
-      var k = Y + '-Q' + q, e = D.kvn[k] || {};
-      var netto = nz(e.brutto) - nz(e.vk) - nz(e.sonst);
-      sb += nz(e.brutto); sv += nz(e.vk); ss += nz(e.sonst); sz += zufluss[q - 1];
-      t += '<tr><td>Q' + q + '</td>' +
-        '<td class="num"><input class="inline" type="number" step="0.01" data-bind="kvn.' + k + '.brutto" value="' + (e.brutto || '') + '"></td>' +
-        '<td class="num"><input class="inline" type="number" step="0.01" data-bind="kvn.' + k + '.vk" value="' + (e.vk || '') + '"></td>' +
-        '<td class="num"><input class="inline" type="number" step="0.01" data-bind="kvn.' + k + '.sonst" value="' + (e.sonst || '') + '"></td>' +
-        '<td class="num">' + eur(netto, 2) + '</td><td class="num">' + eur(zufluss[q - 1], 2) + '</td></tr>';
+    var sb = 0, sv = 0, ss = 0, sz = zufluss.reduce(function (s, x) { return s + x; }, 0), q, karten = '';
+    var maxZ = Math.max.apply(null, zufluss.concat([1]));
+    for (q = 1; q <= 4; q++) {
+      var k = Y + '-Q' + q, e = D.kvn[k] || {}, netto = nz(e.brutto) - nz(e.vk) - nz(e.sonst);
+      sb += nz(e.brutto); sv += nz(e.vk); ss += nz(e.sonst);
+      karten += '<div class="card quartal"><div class="khead"><h2>Q' + q + '</h2><span class="muted small">Zufluss ' + eur(zufluss[q - 1]) + '</span></div>' +
+        '<div class="qbar"><i style="width:' + (zufluss[q - 1] / maxZ * 100).toFixed(1) + '%"></i></div>' +
+        '<div class="fzgruppe">' + feldZeile('kvn.' + k + '.brutto', e.brutto, 'Honorar laut Bescheid') + feldZeile('kvn.' + k + '.vk', e.vk, 'Verwaltungskosten') + feldZeile('kvn.' + k + '.sonst', e.sonst, 'Sonstige Abzüge') + '</div>' +
+        (nz(e.brutto) ? '<p class="satz small">Netto aus dem Bescheid: <b>' + eur(netto) + '</b></p>' : '') + '</div>';
     }
-    t += '<tr class="sum"><td>Jahr</td><td class="num">' + eur(sb, 2) + '</td><td class="num">' + eur(sv, 2) + '</td><td class="num">' + eur(ss, 2) + '</td><td class="num">' + eur(sb - sv - ss, 2) + '</td><td class="num">' + eur(sz, 2) + '</td></tr>';
-    t += '</tbody></table></div>';
-    h += '<div class="card"><h2>Leistungsquartal und Zufluss</h2>' + t +
-      '<p class="muted small">Auf dem Konto kommt der Auszahlungsbetrag nach Abzug der Verwaltungskosten an; die EÜR rechnet mit diesem Zufluss, die Verwaltungskosten sind damit bereits als Betriebsausgabe berücksichtigt. Abschläge und Restzahlungen eines Leistungsquartals fließen oft im Folgequartal oder Folgejahr zu.</p></div>';
+    var h = '<h1>KVN ' + Y + '</h1>';
+    h += '<div class="card hero">' + kopf('Zahlungseingang', 'Für die Steuer zählt, was auf dem Konto ankommt (nach Abzug der Verwaltungskosten). Die Bescheide zeigen, was du je Quartal erarbeitet hast. Abschläge und Restzahlungen eines Quartals kommen oft erst im Folgequartal oder Folgejahr.') +
+      '<div class="gross">' + eur(sz) + '</div><div class="pills"><span>Bescheide brutto <b>' + eur(sb) + '</b></span><span>Verwaltungskosten <b>' + eur(sv) + '</b></span>' + (ss ? '<span>Sonstiges <b>' + eur(ss) + '</b></span>' : '') + '</div></div>';
+    h += '<div class="quartale">' + karten + '</div>';
     return h;
   }
 
   // ---------------------------------------------------------------- Ansicht: Planung
   function viewPlanung() {
     var H = D.hochrechnung, Y = new Date().getFullYear(), A = auswertung(Y);
-    var h = '<h1>Planung</h1><p class="lead">Hochrechnung des laufenden Jahres und Szenarien für die kommenden Jahre.</p>';
-    h += '<div class="card"><h2>Hochrechnung ' + Y + '</h2>' +
-      '<div class="seg" style="margin-bottom:12px"><button data-act="set" data-path="hochrechnung.methode" data-v="linear" aria-pressed="' + (H.methode === 'linear') + '">Linear aus Ist</button><button data-act="set" data-path="hochrechnung.methode" data-v="sitzungen" aria-pressed="' + (H.methode === 'sitzungen') + '">Über Sitzungen</button><button data-act="set" data-path="hochrechnung.methode" data-v="manuell" aria-pressed="' + (H.methode === 'manuell') + '">Manuelle Planwerte</button></div>';
-    if (H.methode === 'linear') h += '<p class="muted small">Jede Kategorie wird mit ihrem bisherigen Verlauf aufs Jahr hochgerechnet (Ist ÷ abgelaufener Jahresanteil).</p>';
+    var h = '<h1>Planung</h1>';
+    // Hochrechnung
+    var methodeInfo = { linear: 'Jede Kategorie wird mit ihrem bisherigen Verlauf aufs Jahr hochgerechnet.', sitzungen: 'KV- und Privathonorare: bisher plus verbleibende Wochen × Sitzungen × Honorar. Alles andere linear.', manuell: 'Du gibst je Kategorie den erwarteten Jahreswert ein. Leere Felder werden linear hochgerechnet.' }[H.methode];
+    var hr = kopf('Hochrechnung ' + Y, methodeInfo) +
+      '<div class="seg" style="margin-bottom:12px"><button data-act="set" data-path="hochrechnung.methode" data-v="linear" aria-pressed="' + (H.methode === 'linear') + '">Linear</button><button data-act="set" data-path="hochrechnung.methode" data-v="sitzungen" aria-pressed="' + (H.methode === 'sitzungen') + '">Sitzungen</button><button data-act="set" data-path="hochrechnung.methode" data-v="manuell" aria-pressed="' + (H.methode === 'manuell') + '">Planwerte</button></div>' +
+      '<div class="pills"><span>Gewinn <b>' + eur(A.P.gewinn) + '</b></span><span>Steuern <b>' + eur(A.R.gesamt) + '</b></span><span>bleibt <b>' + eur(A.verfuegbar / 12) + '</b>/Monat</span></div>';
     if (H.methode === 'sitzungen') {
-      h += '<p class="muted small">KVN- und Privathonorare: Ist plus verbleibende Wochen × Sitzungen × Honorar. Alle übrigen Kategorien linear.</p><div class="row">' +
-        zahlFeld('hochrechnung.kvnSitz', H.kvnSitz, 'KVN: Sitzungen/Woche') + zahlFeld('hochrechnung.kvnHon', H.kvnHon, 'KVN: Honorar je Sitzung') +
-        zahlFeld('hochrechnung.privSitz', H.privSitz, 'Privat: Sitzungen/Woche') + zahlFeld('hochrechnung.privHon', H.privHon, 'Privat: Honorar je Sitzung') +
-        zahlFeld('hochrechnung.urlaubRest', H.urlaubRest, 'Urlaubswochen bis Jahresende') + '</div>';
+      hr += '<div class="fzgruppe">' + feldZeile('hochrechnung.kvnSitz', H.kvnSitz, 'KV: Sitzungen/Woche') + feldZeile('hochrechnung.kvnHon', H.kvnHon, 'KV: Honorar je Sitzung') +
+        feldZeile('hochrechnung.privSitz', H.privSitz, 'Privat: Sitzungen/Woche') + feldZeile('hochrechnung.privHon', H.privHon, 'Privat: Honorar je Sitzung') + feldZeile('hochrechnung.urlaubRest', H.urlaubRest, 'Urlaubswochen bis Jahresende') + '</div>';
     }
     if (H.methode === 'manuell') {
-      h += '<p class="muted small">Erwarteter Jahreswert je Kategorie (positiv eingeben). Leere Felder werden linear hochgerechnet.</p><div class="tablewrap"><table><thead><tr><th>Kategorie</th><th class="num">Ist</th><th class="num">linear</th><th class="num">Jahreswert</th></tr></thead><tbody>';
       ['praxis_ein', 'praxis_aus', 'praxis_inv', 'vorsorge'].forEach(function (g) {
-        h += '<tr class="sub"><td colspan="4"><b>' + esc(GRUPPEN.filter(function (x) { return x.id === g; })[0].name) + '</b></td></tr>';
-        katsIn(g).forEach(function (k) {
+        var gname = GRUPPEN.filter(function (x) { return x.id === g; })[0].name;
+        var felder = katsIn(g).map(function (k) {
           var i = A.ist[k.id] || 0, lin = A.t > 0.04 ? i / A.t : i, mv = (H.manuell[Y] || {})[k.id];
-          h += '<tr><td>' + esc(k.name) + '</td><td class="num">' + eur(Math.abs(i)) + '</td><td class="num">' + eur(Math.abs(lin)) + '</td><td class="num"><input class="inline" type="number" step="1" data-bind="hochrechnung.manuell.' + Y + '.' + k.id + '" value="' + (mv === 0 || mv ? mv : '') + '"></td></tr>';
-        });
+          return '<label class="fz"><span>' + esc(k.name) + '<small>bisher ' + eur(Math.abs(i)) + ' · linear ' + eur(Math.abs(lin)) + '</small></span><input type="number" step="1" inputmode="decimal" data-bind="hochrechnung.manuell.' + Y + '.' + k.id + '" value="' + (mv === 0 || mv ? mv : '') + '" placeholder="' + Math.round(Math.abs(lin)) + '"></label>';
+        }).join('');
+        hr += '<details class="mehr innen" data-auf="hm-' + g + '"' + (ui.offen['hm-' + g] ? ' open' : '') + '><summary><span>' + esc(gname) + '</span></summary><div class="mehrinhalt"><div class="fzgruppe">' + felder + '</div></div></details>';
       });
-      h += '</tbody></table></div>';
     }
-    h += '<p class="small">Ergebnis: Gewinn ' + eur(A.P.gewinn) + ' · Steuern ' + eur(A.R.gesamt) + ' · verfügbar ' + eur(A.verfuegbar / 12) + ' pro Monat.</p></div>';
+    h += '<div class="card">' + hr + '</div>';
 
-    // Szenarien
+    // Szenarien: Diagramm oben, dann ein Jahr nach dem anderen bearbeiten
     if (!D.szenarien.length) { D.szenarien.push(szNeu('Basis')); save(true); }
     if (!ui.szId || !D.szenarien.some(function (s) { return s.id === ui.szId; })) ui.szId = D.szenarien[0].id;
     var sz = D.szenarien.filter(function (s) { return s.id === ui.szId; })[0];
-    var ys = Object.keys(sz.jahre).map(Number).sort();
-    var idx = D.szenarien.indexOf(sz);
-    var sp = 'szenarien.' + idx;
-
-    h += '<div class="card"><h2>Szenarien</h2><div class="row" style="align-items:center">' +
-      '<label class="f" style="max-width:260px"><span>Szenario</span><select id="sz-wahl">' + D.szenarien.map(function (s) { return '<option value="' + s.id + '"' + (s.id === sz.id ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select></label>' +
-      '<label class="f" style="max-width:260px"><span>Name</span><input type="text" data-bindtext="' + sp + '.name" value="' + esc(sz.name) + '"></label></div>' +
-      '<div class="btns"><button class="btn" data-act="sz-neu">Neues Szenario</button><button class="btn" data-act="sz-kopie">Duplizieren</button><button class="btn" data-act="sz-prognose">Aus Prognose ' + Y + ' füllen und fortschreiben</button><button class="btn danger" data-act="sz-weg">Löschen</button></div>' +
-      '<h3>Fortschreibung</h3><div class="row">' +
-      '<label class="f"><span>Honorare/Einnahmen % p. a.</span><input type="number" step="0.1" data-bindpct="' + sp + '.wachstum.h" value="' + (sz.wachstum.h * 100) + '"></label>' +
-      '<label class="f"><span>Praxiskosten % p. a.</span><input type="number" step="0.1" data-bindpct="' + sp + '.wachstum.k" value="' + (sz.wachstum.k * 100) + '"></label>' +
-      '<label class="f"><span>Vorsorge % p. a.</span><input type="number" step="0.1" data-bindpct="' + sp + '.wachstum.v" value="' + (sz.wachstum.v * 100) + '"></label></div>' +
-      '<div class="btns"><button class="btn" data-act="sz-fort">Werte aus ' + ys[0] + ' auf Folgejahre fortschreiben</button><button class="btn" data-act="sz-jahr-plus">Jahr anhängen</button><button class="btn" data-act="sz-jahr-minus"' + (ys.length < 2 ? ' disabled' : '') + '>Letztes Jahr entfernen</button></div>';
-
-    var g = '<div class="tablewrap sgrid" style="margin-top:12px"><table><thead><tr><th></th>' + ys.map(function (y) { return '<th class="num">' + y + '</th>'; }).join('') + '</tr></thead><tbody>';
-    SZ_FELDER.forEach(function (f) {
-      if (f.grp) { g += '<tr class="grp"><td colspan="' + (ys.length + 1) + '">' + f.grp + '</td></tr>'; return; }
-      g += '<tr><td>' + f.n + '</td>' + ys.map(function (y) { return '<td><input type="number" step="any" inputmode="decimal" data-bind="' + sp + '.jahre.' + y + '.' + f.k + '" value="' + nz(sz.jahre[y][f.k]) + '"></td>'; }).join('') + '</tr>';
-    });
-    var erg = ys.map(function (y) { return szRechne(sz, y); });
-    g += '<tr class="grp"><td colspan="' + (ys.length + 1) + '">Ergebnis</td></tr>';
-    var outRow = function (n, fn, cls) { return '<tr class="out ' + (cls || '') + '"><td>' + n + '</td>' + erg.map(function (e) { return '<td class="num">' + fn(e) + '</td>'; }).join('') + '</tr>'; };
-    g += outRow('Umsatz', function (e) { return eur(e.umsatz); });
-    g += outRow('Gewinn', function (e) { return eur(e.gewinn); });
-    g += outRow('Zu versteuerndes Einkommen', function (e) { return eur(e.R.zvE); });
-    g += outRow('Steuern (ESt, Soli, KiSt)', function (e) { return eur(e.R.gesamt); });
-    g += outRow('Durchschnitts- / Grenzsteuersatz', function (e) { return pct(e.R.durchschnitt, 0) + ' / ' + pct(e.R.grenz, 0); });
-    g += outRow('Verfügbar im Jahr', function (e) { return eur(e.verfuegbar); }, 'sum');
-    g += outRow('<b>Verfügbar pro Monat</b>', function (e) { return '<b>' + eur(e.verfuegbar / 12) + '</b>'; });
-    g += '</tbody></table></div>';
-    h += g + '<p class="muted small">„Verfügbar“ = Einnahmen − Betriebsausgaben − Anschaffungen − Steuern − private Vorsorge' + ' (bei Zusammenveranlagung inkl. Partnerin). Tarif ab 2027 mit ' + pct(D.settings.inflation) + ' p. a. fortgeschrieben (änderbar unter Daten).</p></div>';
-
-    // Vergleich
-    var alleJahre = {};
-    D.szenarien.forEach(function (s) { Object.keys(s.jahre).forEach(function (y) { alleJahre[y] = 1; }); });
+    var ys = Object.keys(sz.jahre).map(Number).sort(), idx = D.szenarien.indexOf(sz), sp = 'szenarien.' + idx;
+    if (!ui.szJahr || ys.indexOf(ui.szJahr) < 0) ui.szJahr = ys[0];
+    var jy = ui.szJahr, erg = szRechne(sz, jy);
+    var alleJahre = {}; D.szenarien.forEach(function (s) { Object.keys(s.jahre).forEach(function (y) { alleJahre[y] = 1; }); });
     var jl = Object.keys(alleJahre).map(Number).sort();
-    var serien = D.szenarien.slice(0, 4).map(function (s) {
-      return { name: s.name, werte: jl.map(function (y) { return s.jahre[y] ? szRechne(s, y).verfuegbar / 12 : 0; }) };
+    var serien = D.szenarien.slice(0, 4).map(function (s) { return { name: s.name, werte: jl.map(function (y) { return s.jahre[y] ? szRechne(s, y).verfuegbar / 12 : 0; }) }; });
+    var leer = erg.umsatz === 0;
+    h += '<div class="card">' + kopf('Szenarien', '„Bleibt pro Monat“ = Einnahmen − Betriebsausgaben − Anschaffungen − Steuern − private Vorsorge (bei Zusammenveranlagung mit Partnerin). Der Tarif ab 2027 wird mit ' + pct(D.settings.inflation) + ' p. a. fortgeschrieben (Einstellungen).') +
+      '<div class="row" style="align-items:flex-end"><label class="f" style="max-width:260px"><span>Szenario</span><select id="sz-wahl">' + D.szenarien.map(function (s) { return '<option value="' + s.id + '"' + (s.id === sz.id ? ' selected' : '') + '>' + esc(s.name) + '</option>'; }).join('') + '</select></label></div>' +
+      (leer ? '<div class="note">Dieses Jahr ist noch leer. <a href="#" data-act="sz-prognose">Aus der Hochrechnung ' + Y + ' füllen</a> – danach musst du nur noch anpassen.</div>' : '') +
+      '<p class="muted small" style="margin:4px 0 0">Bleibt pro Monat</p>' + linienChart(serien, jl) +
+      '<div class="jahrchips">' + ys.map(function (y) { var e2 = szRechne(sz, y); return '<button data-act="sz-jahr" data-y="' + y + '" aria-pressed="' + (y === jy) + '"><span>' + y + '</span><b>' + eur(e2.verfuegbar / 12) + '</b></button>'; }).join('') + '</div></div>';
+
+    // Gewähltes Jahr
+    var gruppenF = [], cur = null;
+    SZ_FELDER.forEach(function (f) { if (f.grp) { cur = { n: f.grp, f: [] }; gruppenF.push(cur); } else cur.f.push(f); });
+    h += '<div class="card hero">' + kopf(sz.name + ' · ' + jy) +
+      '<div class="gross mittel">' + eur(erg.verfuegbar / 12) + ' <small>bleiben pro Monat</small></div>' +
+      '<div class="pills"><span>Umsatz <b>' + eur(erg.umsatz) + '</b></span><span>Gewinn <b>' + eur(erg.gewinn) + '</b></span><span>Steuern <b>' + eur(erg.R.gesamt) + '</b></span><span>Ø <b>' + pct(erg.R.durchschnitt, 0) + '</b></span></div></div>';
+    gruppenF.forEach(function (g, gi) {
+      var felder = g.f.map(function (f) { return feldZeile(sp + '.jahre.' + jy + '.' + f.k, nz(sz.jahre[jy][f.k]), f.n); }).join('');
+      var zus = gi === 0 ? eur(erg.umsatz) + ' Umsatz' : gi === 1 ? eur(nz(sz.jahre[jy].kvpv) + nz(sz.jahre[jy].pvw) + nz(sz.jahre[jy].versich)) + ' im Jahr' : (nz(sz.jahre[jy].zusammen) === 1 ? 'zusammen' : 'einzeln') + ' · KiSt ' + (nz(sz.jahre[jy].kist) === 1 ? 'ja' : 'nein');
+      h += gruppeKarte('sz-g' + gi, g.n, zus, '<div class="fzgruppe">' + felder + '</div>');
     });
-    h += '<div class="card"><h2>Verfügbar pro Monat im Vergleich</h2>' + linienChart(serien, jl) +
-      (D.szenarien.length > 4 ? '<p class="muted small">Das Diagramm zeigt die ersten vier Szenarien.</p>' : '') + '</div>';
+    // Verwalten
+    h += gruppeKarte('sz-verwalten', 'Szenario verwalten', 'Name, Fortschreibung, Jahre',
+      '<label class="f" style="max-width:300px"><span>Name</span><input type="text" data-bindtext="' + sp + '.name" value="' + esc(sz.name) + '"></label>' +
+      '<div class="fzgruppe">' + '<label class="fz"><span>Honorare/Einnahmen % p. a.</span><input type="number" step="0.1" data-bindpct="' + sp + '.wachstum.h" value="' + (sz.wachstum.h * 100) + '"></label>' +
+      '<label class="fz"><span>Praxiskosten % p. a.</span><input type="number" step="0.1" data-bindpct="' + sp + '.wachstum.k" value="' + (sz.wachstum.k * 100) + '"></label>' +
+      '<label class="fz"><span>Vorsorge % p. a.</span><input type="number" step="0.1" data-bindpct="' + sp + '.wachstum.v" value="' + (sz.wachstum.v * 100) + '"></label></div>' +
+      '<div class="btns"><button class="btn" data-act="sz-prognose">Aus Hochrechnung ' + Y + ' füllen und fortschreiben</button><button class="btn" data-act="sz-fort">Werte aus ' + ys[0] + ' fortschreiben</button></div>' +
+      '<div class="btns"><button class="btn" data-act="sz-neu">Neues Szenario</button><button class="btn" data-act="sz-kopie">Duplizieren</button><button class="btn" data-act="sz-jahr-plus">Jahr anhängen</button><button class="btn" data-act="sz-jahr-minus"' + (ys.length < 2 ? ' disabled' : '') + '>Letztes Jahr entfernen</button><button class="btn danger" data-act="sz-weg">Löschen</button></div>');
     return h;
   }
 
-  // ---------------------------------------------------------------- Ansicht: Daten
+  // ---------------------------------------------------------------- Ansicht: Einstellungen
   function viewDaten() {
-    var h = '<h1>Daten</h1><p class="lead">Alle Daten liegen nur auf diesem Gerät. Zum Abgleich zwischen Notebook und Handy dient die JSON-Datei.</p>';
-    h += '<div class="card"><h2>Speicherort</h2>';
+    var h = '<h1>Einstellungen</h1>';
+    h += gruppeKarte('e-leiste', 'Leiste anpassen', sichtbareBereiche().map(function (id) { return BEREICH_NAME[id]; }).join(' · '), anpassenListe('nav'));
+    var ks = kartenOrdnung();
+    h += gruppeKarte('e-karten', 'Übersicht anpassen', (ks.order.length - ks.aus.length) + ' von ' + ks.order.length + ' Karten sichtbar', anpassenListe('karten'));
+
+    // Daten und Sicherung
+    var dat = '';
     if (hatFS) {
       if (fileHandle) {
-        h += '<p>Verbunden mit <b>' + esc(fileHandle.name) + '</b> · ' + (dateiStatus === 'verbunden' ? 'Änderungen werden automatisch gespeichert.' : 'Zugriff muss erneut erlaubt werden.') + '</p>' +
+        dat += '<p>Verbunden mit <b>' + esc(fileHandle.name) + '</b> · ' + (dateiStatus === 'verbunden' ? 'speichert automatisch.' : 'Zugriff erneut erlauben.') + '</p>' +
           '<div class="btns">' + (dateiStatus !== 'verbunden' ? '<button class="btn primary" data-act="datei-erlauben">Zugriff erlauben</button>' : '<button class="btn" data-act="datei-jetzt">Jetzt speichern</button>') +
-          '<button class="btn" data-act="datei-oeffnen">Andere Datei öffnen</button><button class="btn" data-act="datei-trennen">Verbindung trennen</button></div>';
+          '<button class="btn" data-act="datei-oeffnen">Andere Datei öffnen</button><button class="btn" data-act="datei-trennen">Trennen</button></div>';
       } else {
-        h += '<p>Noch keine Datei verbunden. Die App schreibt dann jede Änderung direkt in eine JSON-Datei, z. B. in einem Cloud- oder Sync-Ordner.</p>' +
-          '<div class="btns"><button class="btn primary" data-act="datei-neu">Neue Datendatei anlegen</button><button class="btn" data-act="datei-oeffnen">Vorhandene Datei öffnen</button></div>';
+        dat += '<p>Optional: Die App schreibt jede Änderung in eine JSON-Datei, z. B. in einem Sync-Ordner.</p><div class="btns"><button class="btn primary" data-act="datei-neu">Datendatei anlegen</button><button class="btn" data-act="datei-oeffnen">Vorhandene öffnen</button></div>';
       }
-    } else {
-      h += '<p>Auf diesem Gerät speichert die App im Browser. Zum Abgleich: auf dem Notebook die Datendatei hierher übertragen und unten einlesen; Änderungen vom Handy per „Datensicherung herunterladen“ zurückgeben.</p>';
     }
-    h += '<p class="muted small">Stand der Daten: ' + new Date(D.meta.geaendert).toLocaleString('de-DE') + ' · ' + D.buchungen.length + ' Buchungen · ' + D.regeln.length + ' Regeln</p>';
-    h += '<div class="btns"><button class="btn" data-act="export-json">Datensicherung herunterladen</button><button class="btn" data-act="import-json">Datensicherung einlesen</button><button class="btn" data-act="csv">Kontoumsätze importieren (Excel/CSV)</button></div></div>';
+    dat += '<div class="btns"><button class="btn" data-act="export-json">Sicherung herunterladen</button><button class="btn" data-act="import-json">Sicherung einlesen</button><button class="btn" data-act="csv">Kontoumsätze importieren</button></div>' +
+      '<p class="muted small">Stand ' + new Date(D.meta.geaendert).toLocaleString('de-DE') + ' · ' + D.buchungen.length + ' Buchungen · Alle Daten bleiben auf diesem Gerät.</p>';
+    h += gruppeKarte('e-daten', 'Daten und Sicherung ' + info('Abgleich Handy ↔ Notebook: Sicherung auf dem einen Gerät herunterladen und auf dem anderen einlesen. Einlesen ersetzt den Stand vollständig.'), fileHandle ? 'Datei ' + esc(fileHandle.name) : 'im Browser gespeichert', dat);
 
-    h += installKarte();
-    // Regeln
-    h += '<div class="card"><h2>Regeln für die Kategorisierung</h2><p class="muted small">Die erste passende Regel gilt. IBAN: exakter Vergleich; Name, Verwendungszweck, beides: enthält den Text.</p>';
-    if (D.regeln.length) {
-      h += '<div class="tablewrap"><table><thead><tr><th>Feld</th><th>Muster</th><th>Kategorie</th><th></th></tr></thead><tbody>' +
-        D.regeln.map(function (r, i) {
-          return '<tr><td>' + ({ iban: 'IBAN', name: 'Name', text: 'Verwendungszweck', art: 'Buchungsart', alle: 'Name, Zweck oder Art' })[r.feld] + '</td><td>' + esc(r.muster) + '</td><td>' + esc(katName(r.kat)) + '</td><td style="white-space:nowrap">' +
-            (i ? '<button class="btn small" data-act="regel-hoch" data-i="' + i + '" aria-label="nach oben">↑</button> ' : '') +
-            '<button class="btn small danger" data-act="regel-weg" data-i="' + i + '">Entfernen</button></td></tr>';
-        }).join('') + '</tbody></table></div>';
-    }
-    h += '<div class="row" style="margin-top:10px"><label class="f"><span>Feld</span><select id="rg-feld"><option value="name">Name</option><option value="iban">IBAN</option><option value="text">Verwendungszweck</option><option value="art">Buchungsart</option><option value="alle">Name, Zweck oder Art</option></select></label>' +
-      '<label class="f"><span>Muster</span><input type="text" id="rg-muster"></label><label class="f"><span>Kategorie</span><select id="rg-kat">' + katOptions('', false) + '</select></label></div>' +
-      '<div class="btns"><button class="btn" data-act="regel-neu">Regel hinzufügen</button><button class="btn" data-act="regeln-alle">Regeln auf alle Buchungen anwenden</button></div></div>';
+    h += gruppeKarte('e-app', 'Als App nutzen', istApp() ? 'installiert ✓' : 'im Browser', installKarte().replace(/^<div class="card"><h2>Als App nutzen<\/h2>/, '').replace(/<\/div>$/, ''));
 
-    // Einstellungen
-    h += '<div class="card"><h2>Annahmen</h2><div class="row">' +
-      '<label class="f"><span>Inflation / Tarif-Fortschreibung % p. a.</span><input type="number" step="0.1" data-bindpct="settings.inflation" value="' + D.settings.inflation * 100 + '"></label>' +
-      '<label class="f"><span>Kirchensteuersatz %</span><input type="number" step="1" data-bindpct="settings.kistSatz" value="' + D.settings.kistSatz * 100 + '"></label></div>' +
-      '<p class="muted small">Stand der Steuerparameter: Veranlagungszeitraum 2026 (Grundfreibetrag 12.348 €, Soli-Freigrenze 20.350 €, Höchstbetrag Altersvorsorge 30.826 €). Version ' + APP_VERSION + '.</p></div>';
+    // Regeln kompakt mit Suche
+    var q = (ui.regelSuche || '').toLowerCase();
+    var feldName = { iban: 'IBAN', name: 'Name', text: 'Zweck', art: 'Art', alle: 'Alles' };
+    var treffer = D.regeln.map(function (r, i) { return { r: r, i: i }; }).filter(function (x) { return !q || (x.r.muster + ' ' + katName(x.r.kat)).toLowerCase().indexOf(q) >= 0; });
+    var zeig = ui.regelAlle ? treffer : treffer.slice(0, 25);
+    var rg = '<input type="text" id="rg-suche" placeholder="Regeln durchsuchen" value="' + esc(ui.regelSuche || '') + '">' +
+      '<div class="regeln">' + zeig.map(function (x) {
+        return '<div class="regel"><span class="rmuster"><small>' + feldName[x.r.feld] + '</small>' + esc(String(x.r.muster).split('\n')[0]) + '</span><span class="rkat">→ ' + esc(katName(x.r.kat)) + '</span>' +
+          (x.i ? '<button class="btn small" data-act="regel-hoch" data-i="' + x.i + '" aria-label="nach oben">↑</button>' : '<span></span>') +
+          '<button class="btn small danger" data-act="regel-weg" data-i="' + x.i + '" aria-label="Entfernen">×</button></div>';
+      }).join('') + '</div>' +
+      (treffer.length > zeig.length ? '<button class="btn small" data-act="regeln-zeigen">Alle ' + treffer.length + ' zeigen</button>' : '') +
+      '<h3>Neue Regel</h3><div class="row"><label class="f"><span>Feld</span><select id="rg-feld"><option value="name">Name</option><option value="iban">IBAN</option><option value="text">Verwendungszweck</option><option value="art">Buchungsart</option><option value="alle">Name, Zweck oder Art</option></select></label>' +
+      '<label class="f"><span>enthält</span><input type="text" id="rg-muster"></label><label class="f"><span>Kategorie</span><select id="rg-kat">' + katOptions('', false) + '</select></label></div>' +
+      '<div class="btns"><button class="btn" data-act="regel-neu">Regel hinzufügen</button><button class="btn" data-act="regeln-alle">Auf alle Buchungen anwenden</button></div>';
+    h += gruppeKarte('e-regeln', 'Regeln ' + info('Die erste passende Regel gilt. IBAN: exakter Vergleich, sonst „enthält den Text“. Regeln entstehen auch beim Zuordnen und Importieren.'), D.regeln.length + ' Regeln', rg);
 
-    h += '<div class="card"><h2>Löschen</h2>' +
-      '<p class="muted small"><b>Alle Buchungen löschen</b> entfernt nur die Buchungen (aller Jahre). Regeln, Steuerangaben, KVN-Bescheide, Anlagen und Planung bleiben erhalten – ein erneuter Import ordnet dann über die Regeln wieder zu. Einzelne Monate, Kategorien oder Suchtreffer löschst du unter Buchungen über „Angezeigte löschen“.</p>' +
-      '<div class="btns"><button class="btn danger" data-act="loeschen-alle"' + (D.buchungen.length ? '' : ' disabled') + '>Alle Buchungen löschen (' + D.buchungen.length + ')</button></div>' +
-      '<p class="muted small" style="margin-top:14px"><b>Zurücksetzen</b> löscht alle Daten in diesem Browser. Eine verbundene Datei bleibt erhalten.</p><button class="btn danger" data-act="reset">Alle Daten in diesem Browser löschen</button></div>';
+    h += gruppeKarte('e-annahmen', 'Annahmen', 'Inflation ' + pct(D.settings.inflation) + ' · KiSt ' + pct(D.settings.kistSatz, 0),
+      '<div class="fzgruppe"><label class="fz"><span>Inflation / Tarif-Fortschreibung % p. a.</span><input type="number" step="0.1" data-bindpct="settings.inflation" value="' + D.settings.inflation * 100 + '"></label>' +
+      '<label class="fz"><span>Kirchensteuersatz %</span><input type="number" step="1" data-bindpct="settings.kistSatz" value="' + D.settings.kistSatz * 100 + '"></label></div>' +
+      '<p class="muted small">Steuerparameter 2026: Grundfreibetrag 12.348 €, Soli-Freigrenze 20.350 €, Höchstbetrag Altersvorsorge 30.826 €. Version ' + APP_VERSION + '.</p>');
+
+    h += gruppeKarte('e-loeschen', 'Löschen', '',
+      '<p class="muted small">„Alle Buchungen löschen“ behält Regeln, Steuerangaben, KVN und Planung – ein neuer Import ordnet dann wieder zu. Einzelne Buchungen löschst du unter Buchungen → Auswählen.</p>' +
+      '<div class="btns"><button class="btn danger" data-act="loeschen-alle"' + (D.buchungen.length ? '' : ' disabled') + '>Alle Buchungen löschen (' + D.buchungen.length + ')</button><button class="btn danger" data-act="reset">Alle Daten in diesem Browser löschen</button></div>');
     return h;
   }
 
@@ -1682,6 +1919,7 @@
   // ---------------------------------------------------------------- Ereignisse
   document.addEventListener('click', function (e) {
     var tab = e.target.closest('[data-tab]');
+    if (tab && $('#dlg').open && $('#dlg').contains(tab)) $('#dlg').close();
     if (tab) { ui.tab = tab.dataset.tab; history.replaceState(null, '', '#' + ui.tab); render(); window.scrollTo(0, 0); return; }
     var a = e.target.closest('[data-act]');
     if (!a) return;
@@ -1715,6 +1953,14 @@
         D.buchungen = D.buchungen.filter(function (b) { return !wegIds[b.id]; });
         save(); toast(weg.length + ' Buchungen gelöscht'); break;
       }
+      case 'mehr-blatt': mehrBlatt(); break;
+      case 'anpassen': anpassenDialog(a.dataset.was); break;
+      case 'anp-hoch': anpassenAendern(a.dataset.was, a.dataset.id, 'hoch'); break;
+      case 'anp-runter': anpassenAendern(a.dataset.was, a.dataset.id, 'runter'); break;
+      case 'wohin': ui.wohin = a.dataset.v; render(); break;
+      case 'zeige-kat': ui.tab = 'buchungen'; ui.filter.kat = a.dataset.k; ui.filter.monat = ''; ui.filter.suche = ''; history.replaceState(null, '', '#buchungen'); render(); window.scrollTo(0, 0); break;
+      case 'sz-jahr': ui.szJahr = +a.dataset.y; render(); break;
+      case 'regeln-zeigen': ui.regelAlle = true; render(); break;
       case 'ritual': ritualStart(); break;
       case 'r-kat': ritualZuordnen(a.dataset.k); break;
       case 'r-skip': ritualWeiter('skip'); break;
@@ -1822,6 +2068,7 @@
     if (el.id === 'jahr') { ui.jahr = +el.value; ui.filter.limit = 200; render(); return; }
     if (el.id === 'sz-wahl') { ui.szId = el.value; render(); return; }
     if (el.dataset.filter) { ui.filter[el.dataset.filter] = el.value; ui.filter.limit = 200; render(); return; }
+    if (el.dataset.anp) { anpassenAendern(el.dataset.anp, el.dataset.id, 'an', el.checked); return; }
     if (el.id === 'r-andere') { if (el.value) ritualZuordnen(el.value); return; }
     if (el.id === 'r-regel' || el.id === 'r-alle' || el.dataset.wenn) return;
     if (el.id === 'auswahl-kat' && el.value && ui.auswahl) {
@@ -1852,6 +2099,11 @@
       var k = e.target.dataset.wenn; ui.wenn[k] = +e.target.value;
       var o = document.getElementById('wenn-' + k); if (o) o.textContent = wennLabel(k, ui.wenn[k]);
       var erg = $('#wenn-erg'); if (erg) erg.innerHTML = wennErgebnis(auswertung(ui.jahr));
+      return;
+    }
+    if (e.target.id === 'rg-suche') {
+      ui.regelSuche = e.target.value; clearTimeout(document.__rgT);
+      document.__rgT = setTimeout(function () { var pos = e.target.selectionStart; render(); var f = $('#rg-suche'); if (f) { f.focus(); f.setSelectionRange(pos, pos); } }, 250);
       return;
     }
     if (e.target.id === 'f-suche') {

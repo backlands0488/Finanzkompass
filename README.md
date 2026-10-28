@@ -15,12 +15,12 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 - Meldet Chrome „bereits installiert“, die App startet aber nicht: in den Android-Einstellungen unter Apps „Finanzkompass“ deinstallieren und neu installieren (vorher Datensicherung herunterladen).
 
 - **Handy (Chrome):** Adresse öffnen → Menü ⋮ → „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.
-- **Notebook (Chrome/Edge):** Adresse öffnen → Installieren-Symbol in der Adressleiste. Danach unter **Daten → Neue Datendatei anlegen** eine JSON-Datei wählen, gern in einem Sync-Ordner. Jede Änderung wird dort automatisch gespeichert. Nach einem Browser-Neustart einmal „Zugriff erlauben“ klicken.
+- **Notebook (Chrome/Edge):** Adresse öffnen → Installieren-Symbol in der Adressleiste. Danach unter **Einstellungen → Daten und Sicherung → Datendatei anlegen** eine JSON-Datei wählen, gern in einem Sync-Ordner. Jede Änderung wird dort automatisch gespeichert. Nach einem Browser-Neustart einmal „Zugriff erlauben“ klicken.
 
 ## Abgleich Handy ↔ Notebook
 
-- Notebook → Handy: die Datendatei aufs Handy bringen und dort **Daten → Datensicherung einlesen**.
-- Handy → Notebook: auf dem Handy **Datensicherung herunterladen**, auf dem Notebook **Daten → Andere Datei öffnen** und diese Datei wählen.
+- Notebook → Handy: die Datendatei aufs Handy bringen und dort **Einstellungen → Sicherung einlesen**.
+- Handy → Notebook: auf dem Handy **Sicherung herunterladen**, auf dem Notebook **Einstellungen → Andere Datei öffnen** und diese Datei wählen.
 - Einlesen ersetzt immer den kompletten Stand; zuletzt bearbeitetes Gerät gewinnt.
 
 ## Erste Schritte
@@ -33,9 +33,11 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 4. **KVN:** Honorarbescheide je Quartal eintragen (brutto, Verwaltungskosten).
 5. **Planung:** Hochrechnungsmethode wählen; Szenarien über „Aus Prognose füllen und fortschreiben“ anlegen und je Jahr anpassen.
 
-## Übersicht
+## Bedienung
 
-Oben drei Antworten: *Was bleibt mir?* (pro Monat, mit Aufteilung jedes Euros), *Reicht meine Steuerrücklage?* (Ring: bezahlt + zurückgelegt) und *Bin ich auf Kurs?* (Gewinnziel oder Vorjahr). Darunter „Was wäre, wenn …“ mit Reglern für Sitzungen, Urlaub und Ausgaben – Ergebnis nach Steuer. Details (Kennzahlen, Monate, EÜR, Cashflow) zum Aufklappen. Offene Buchungen werden über „Zuordnen“ als Karten nacheinander mit Vorschlägen kategorisiert.
+- **Leiste:** unten (Handy) höchstens vier Bereiche plus „Mehr“; Standard Übersicht · Steuer · Planung · KVN. Reihenfolge und Sichtbarkeit unter ⚙ Einstellungen → Leiste anpassen (oder Mehr → Leiste anpassen).
+- **Übersicht:** Karten – Was bleibt mir?, Steuerrücklage, Kurs, Demnächst (Steuertermine nach § 37 EStG und erwartete Zahlungen), Zuordnen, Monatsrückblick, Woher/Wohin, Fixkosten (automatisch erkannte wiederkehrende Zahlungen), Was wäre, wenn …, Details. Über „Übersicht anpassen“ verschieben und ausblenden.
+- **Steuer, KVN, Planung:** Ergebnis oben, Eingaben in aufklappbaren Gruppen mit Zusammenfassung; Erklärungen hinter „i“. Szenarien werden Jahr für Jahr bearbeitet.
 
 ## Rechenstand
 
