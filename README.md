@@ -11,6 +11,9 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 
 ## Installieren
 
+- Wichtig: Chrome-Menü ⋮ → **„App installieren“** wählen, nicht „Verknüpfung erstellen“ (die öffnet nur einen Browser-Tab). Danach über das App-Symbol starten. Langes Drücken auf das Symbol bietet Kurzbefehle (Zuordnen, Buchungen, Steuer).
+- Meldet Chrome „bereits installiert“, die App startet aber nicht: in den Android-Einstellungen unter Apps „Finanzkompass“ deinstallieren und neu installieren (vorher Datensicherung herunterladen).
+
 - **Handy (Chrome):** Adresse öffnen → Menü ⋮ → „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.
 - **Notebook (Chrome/Edge):** Adresse öffnen → Installieren-Symbol in der Adressleiste. Danach unter **Daten → Neue Datendatei anlegen** eine JSON-Datei wählen, gern in einem Sync-Ordner. Jede Änderung wird dort automatisch gespeichert. Nach einem Browser-Neustart einmal „Zugriff erlauben“ klicken.
 
@@ -29,6 +32,10 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 3. **Steuer:** Anstellung Jan–März 2026 (Lohnsteuerbescheinigung) und Jahressummen des Vorauszahlungsbescheids eintragen. Steuerbuchungen, die ein anderes Jahr betreffen (z. B. Nachzahlung 2025), dort umstellen.
 4. **KVN:** Honorarbescheide je Quartal eintragen (brutto, Verwaltungskosten).
 5. **Planung:** Hochrechnungsmethode wählen; Szenarien über „Aus Prognose füllen und fortschreiben“ anlegen und je Jahr anpassen.
+
+## Übersicht
+
+Oben drei Antworten: *Was bleibt mir?* (pro Monat, mit Aufteilung jedes Euros), *Reicht meine Steuerrücklage?* (Ring: bezahlt + zurückgelegt) und *Bin ich auf Kurs?* (Gewinnziel oder Vorjahr). Darunter „Was wäre, wenn …“ mit Reglern für Sitzungen, Urlaub und Ausgaben – Ergebnis nach Steuer. Details (Kennzahlen, Monate, EÜR, Cashflow) zum Aufklappen. Offene Buchungen werden über „Zuordnen“ als Karten nacheinander mit Vorschlägen kategorisiert.
 
 ## Rechenstand
 

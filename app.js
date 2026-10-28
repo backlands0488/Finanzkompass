@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.3.0';
+  var APP_VERSION = '1.4.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -103,7 +103,8 @@
       steuer: {},
       hochrechnung: { methode: 'linear', kvnSitz: 0, kvnHon: 0, privSitz: 0, privHon: 0, urlaubRest: 0, manuell: {} },
       szenarien: [],
-      csvMapping: null
+      csvMapping: null,
+      ziele: {}, ruecklage: {}, meilensteine: {}
     };
   }
   function migrate(d) {
@@ -361,7 +362,7 @@
       Y: Y, t: t, stichtag: stichtag, unkat: unkat, mon: mon, ist: ist, prog: prog,
       I: I, P: P, afa: afa, pausch: pausch, vorsorgeJahr: vorsorgeJahr,
       bezahlt: bezahlt, vzPlan: vzPlan, vzOffen: vzOffen, kistGezahlt: kistGezahlt,
-      R: R, lohnNetto: lohnNetto, partnerNetto: partnerNetto, verfuegbar: verfuegbar,
+      R: R, eingabe: eingabe, lohnNetto: lohnNetto, partnerNetto: partnerNetto, verfuegbar: verfuegbar,
       nochZuZahlen: nochZuZahlen, monateRest: monateRest,
       ruecklageMonat: nochZuZahlen / monateRest,
       ruecklageQuote: P.gewinn > 0 ? R.gesamt / (P.gewinn + Math.max(0, lohnNetto)) : 0,
@@ -548,6 +549,8 @@
     jahr: new Date().getFullYear(),
     filter: { monat: '', kat: '', suche: '', limit: 200 },
     auswahl: null, // null = Auswahlmodus aus; sonst { id: true }
+    offen: {},     // aufgeklappte Detailbereiche
+    wenn: { sitz: 0, urlaub: 0, ausg: 0 },
     szId: null
   };
   if (!TABS.some(function (t) { return t[0] === ui.tab; })) ui.tab = 'uebersicht';
@@ -687,33 +690,226 @@
   }
 
   // ---------------------------------------------------------------- Ansicht: Übersicht
+  // Aufbau nach „Progressive Disclosure“: drei Antworten oben, Details zum Aufklappen darunter.
+  function aufklapp(id, titel, inhalt, offen) {
+    var auf = ui.offen[id] !== undefined ? ui.offen[id] : !!offen;
+    return '<details class="mehr card" data-auf="' + id + '"' + (auf ? ' open' : '') + '><summary><span>' + titel + '</span></summary><div class="mehrinhalt">' + inhalt + '</div></details>';
+  }
+  // Fortschrittsring (SVG); teile = [{ wert: 0..1, farbe }]
+  function ring(teile, mitte, unter) {
+    var r = 42, U = 2 * Math.PI * r, off = 0;
+    var s = '<svg viewBox="0 0 100 100" class="ring" aria-hidden="true"><circle cx="50" cy="50" r="' + r + '" class="ringbahn"/>';
+    teile.forEach(function (t) {
+      var w = Math.max(0, Math.min(1 - off, t.wert));
+      if (w > 0.001) s += '<circle cx="50" cy="50" r="' + r + '" class="ringteil" stroke="' + t.farbe + '" stroke-dasharray="' + (w * U) + ' ' + U + '" stroke-dashoffset="' + (-off * U) + '" transform="rotate(-90 50 50)"/>';
+      off += w;
+    });
+    return '<div class="ringbox">' + s + '</svg><div class="ringtext"><b>' + mitte + '</b>' + (unter ? '<span>' + unter + '</span>' : '') + '</div></div>';
+  }
+  function hatJahr(y) { return D.buchungen.some(function (b) { return +b.datum.slice(0, 4) === y; }); }
+  function zielFuer(Y) {
+    var z = D.ziele[Y] && nz(D.ziele[Y].gewinn);
+    if (z > 0) return { wert: z, quelle: 'ziel' };
+    if (hatJahr(Y - 1)) { var v = auswertung(Y - 1).P.gewinn; if (v > 0) return { wert: v, quelle: 'vorjahr' }; }
+    return null;
+  }
+  function honorar() { return nz(D.settings.honorar) || nz(D.hochrechnung.kvnHon) || 0; }
+
+  // Kleine, ruhige Momente: einmalig vermerken und freundlich melden
+  function meilenstein(key, text) {
+    if (D.meilensteine[key]) return false;
+    D.meilensteine[key] = isoHeute();
+    setTimeout(function () { save(true); toast(text); }, 400);
+    return true;
+  }
+
+  function antwortBleibt(A) {
+    var basis = A.P.ein + Math.max(0, A.lohnNetto) + Math.max(0, A.partnerNetto);
+    var teile = [
+      { n: 'Praxiskosten', w: A.P.aus + A.P.inv, f: 'var(--teil-kosten)' },
+      { n: 'Steuern', w: A.R.gesamt, f: 'var(--teil-steuer)' },
+      { n: 'Vorsorge & Versicherungen', w: A.vorsorgeJahr.gesamt, f: 'var(--teil-vorsorge)' },
+      { n: 'Dir bleibt', w: Math.max(0, A.verfuegbar), f: 'var(--teil-bleibt)' }
+    ];
+    var h = '<div class="antwort"><div class="frage">Was bleibt mir' + (A.vergangen ? ' ' + A.Y + ' geblieben' : '') + '?</div>';
+    if (A.verfuegbar < 0) {
+      h += '<div class="gross">' + eur(A.verfuegbar / 12) + ' <small>pro Monat</small></div><p class="satz">Nach Steuern und Vorsorge reicht es ' + (A.vergangen ? 'in diesem Jahr' : 'voraussichtlich') + ' nicht ganz. Schau in die Details unten, woran es liegt.</p>';
+    } else {
+      h += '<div class="gross">' + eur(A.verfuegbar / 12) + ' <small>pro Monat</small></div>' +
+        '<p class="satz">' + (A.vergangen ? 'Nach' : 'Voraussichtlich nach') + ' Steuern, Kranken- und Altersvorsorge' + (st(A.Y).zusammen ? ' (Haushalt)' : '') + '. Im Jahr ' + eur(A.verfuegbar) + '.</p>';
+    }
+    if (basis > 0) {
+      h += '<div class="euro" role="img" aria-label="Aufteilung jedes Euros">' + teile.map(function (t) {
+        var a = Math.max(0, t.w) / basis; return a > 0.004 ? '<i style="width:' + (a * 100).toFixed(2) + '%;background:' + t.f + '"></i>' : '';
+      }).join('') + '</div><div class="euroleg">' + teile.map(function (t) {
+        return '<span><i style="background:' + t.f + '"></i>' + t.n + ' <b>' + Math.round(Math.max(0, t.w) / basis * 100) + ' ct</b></span>';
+      }).join('') + '</div><p class="muted small">… von jedem Euro, der hereinkommt' + (A.lohnNetto > 0 ? ' (Praxis und Anstellung)' : '') + '.</p>';
+    }
+    return h + '</div>';
+  }
+
+  function antwortSteuer(A) {
+    var S = st(A.Y), L = S.lohn;
+    var lohnAbzug = nz(L.lohnsteuer) + nz(L.soli) + nz(L.kist);
+    var bezahlt = A.bezahlt.est + A.bezahlt.soli + A.bezahlt.kist + lohnAbzug;
+    var offen = A.nochZuZahlen;
+    var bedarf = bezahlt + offen;
+    var aktuell = A.Y === new Date().getFullYear();
+    var ruecklage = aktuell ? nz(D.ruecklage.betrag) : 0;
+    var gedecktR = Math.min(ruecklage, offen);
+    var quote = bedarf > 0 ? (bezahlt + gedecktR) / bedarf : 1;
+    var h = '<div class="antwort"><div class="frage">Reicht meine Steuerrücklage?</div><div class="antwortzeile">';
+    h += ring([{ wert: bedarf > 0 ? bezahlt / bedarf : 0, farbe: 'var(--teil-steuer)' }, { wert: bedarf > 0 ? gedecktR / bedarf : 0, farbe: 'var(--teil-ruecklage)' }],
+      Math.round(Math.min(1, quote) * 100) + ' %', 'gedeckt');
+    var kurz = A.vergangen ? 'Steuer ' + A.Y + ': <b>' + eur(A.R.gesamt) + '</b>' :
+      'Voraussichtlich <b>' + eur(A.R.gesamt) + '</b> Steuern für ' + A.Y + '.<br><span class="muted">Bezahlt ' + eur(bezahlt) + (ruecklage ? ' · zurückgelegt ' + eur(gedecktR) : '') + '</span>';
+    h += '<p class="satz">' + kurz + '</p></div><div>';
+    if (A.vergangen) {
+      h += '<p class="satz">' + (A.R.offenGesamt > 0 ? 'Laut Rechnung sind noch etwa <b>' + eur(A.R.offenGesamt) + '</b> offen (Nachzahlung mit dem Bescheid).' : A.R.offenGesamt < 0 ? 'Voraussichtlich gibt es <b>' + eur(-A.R.offenGesamt) + '</b> zurück.' : 'Alles bezahlt.') + '</p>';
+    } else if (quote >= 0.995) {
+      h += '<p class="satz"><span class="haken">✓</span> <b>Gut vorgesorgt.</b> Alles bezahlt oder zurückgelegt.</p>';
+      if (aktuell && bedarf > 0) meilenstein('steuer-gedeckt-' + A.Y, 'Steuer ' + A.Y + ' ist voll gedeckt – gut vorgesorgt.');
+    } else {
+      var luecke = offen - gedecktR;
+      h += '<p class="satz">Es fehlen noch <b>' + eur(luecke) + '</b> – das sind <b>' + eur(luecke / A.monateRest) + ' pro Monat</b> bis Jahresende.</p>';
+    }
+    if (A.R.offenGesamt < -50 && !A.vergangen) h += '<p class="muted small">Nach heutigem Stand gibt es voraussichtlich etwa ' + eur(-A.R.offenGesamt) + ' Erstattung.</p>';
+    if (aktuell) h += '<label class="inline-f">Zurückgelegt für Steuern <input type="number" inputmode="decimal" step="100" data-bind="ruecklage.betrag" value="' + (ruecklage || '') + '" placeholder="0"> €</label>';
+    h += '<p class="muted small">Faustregel: von jedem Euro Gewinn etwa ' + Math.round(A.ruecklageQuote * 100) + ' Cent zur Seite legen.</p>';
+    return h + '</div></div>';
+  }
+
+  function antwortKurs(A) {
+    var Y = A.Y, z = zielFuer(Y);
+    var h = '<div class="antwort"><div class="frage">Bin ich auf Kurs?</div>';
+    var zielFeld = '<label class="inline-f">Mein Gewinnziel ' + Y + ' <input type="number" inputmode="decimal" step="1000" data-bind="ziele.' + Y + '.gewinn" value="' + ((D.ziele[Y] && D.ziele[Y].gewinn) || '') + '" placeholder="' + (z && z.quelle === 'vorjahr' ? Math.round(z.wert) : 'z. B. 60000') + '"> €</label>';
+    if (!z) {
+      return h + '<p class="satz">Hochrechnung für ' + Y + ': <b>' + eur(A.P.gewinn) + '</b> Gewinn. Leg ein Ziel fest, dann zeige ich dir, ob du im Plan liegst.</p>' + zielFeld + '</div>';
+    }
+    var soll = A.vergangen ? z.wert : z.wert * Math.min(1, A.t);
+    var ist = A.I.gewinn, prog = A.P.gewinn, diff = prog - z.wert;
+    var anteil = Math.max(0, Math.min(1.15, ist / z.wert)), sollA = Math.max(0, Math.min(1, soll / z.wert));
+    h += '<div class="kursbar" role="img" aria-label="Fortschritt zum Gewinnziel"><i style="width:' + (Math.min(1, anteil) * 100).toFixed(1) + '%"></i>' +
+      (!A.vergangen && A.t < 1 ? '<em style="left:' + (sollA * 100).toFixed(1) + '%" title="Heute im Plan"></em>' : '') + '</div>' +
+      '<div class="kursleg"><span>Bisher ' + eur(ist) + '</span><span>' + (z.quelle === 'ziel' ? 'Ziel ' : 'Vorjahr ') + eur(z.wert) + '</span></div>';
+    var hon = honorar(), sitz = hon > 0 ? Math.round(Math.abs(diff) / hon) : 0;
+    if (A.vergangen) {
+      h += '<p class="satz">' + (ist >= z.wert ? '<span class="haken">✓</span> Ziel erreicht: ' : 'Ergebnis: ') + '<b>' + eur(ist) + '</b> Gewinn, ' + (ist >= z.wert ? eur(ist - z.wert) + ' mehr als ' : eur(z.wert - ist) + ' weniger als ') + (z.quelle === 'ziel' ? 'geplant' : 'im Vorjahr') + '.</p>';
+    } else if (Math.abs(diff) < z.wert * 0.02) {
+      h += '<p class="satz"><span class="haken">✓</span> <b>Genau im Plan.</b> Hochrechnung ' + eur(prog) + '.</p>';
+    } else if (diff > 0) {
+      h += '<p class="satz"><span class="haken">✓</span> Du liegst <b>' + eur(diff) + ' über</b> ' + (z.quelle === 'ziel' ? 'deinem Ziel' : 'dem Vorjahr') + ' (Hochrechnung ' + eur(prog) + ').</p>';
+    } else {
+      h += '<p class="satz">Hochrechnung ' + eur(prog) + ' – <b>' + eur(-diff) + ' unter</b> ' + (z.quelle === 'ziel' ? 'deinem Ziel' : 'dem Vorjahr') + (sitz ? ', das entspricht etwa ' + sitz + ' Sitzungen' : '') + '.</p>';
+    }
+    if (z.quelle === 'ziel' && ist >= z.wert) meilenstein('ziel-' + Y, 'Gewinnziel ' + Y + ' erreicht. Schön!');
+    if (!A.vergangen && A.t < 1) h += '<p class="muted small">Der Strich zeigt, wo du heute bei gleichmäßigem Verlauf stündest. KV-Zahlungen kommen quartalsweise, daher schwankt das.</p>';
+    return h + zielFeld + '</div>';
+  }
+
+  function karteZuordnen(A) {
+    var offen = D.buchungen.filter(function (b) { return !b.kat; }).length;
+    if (offen) {
+      var min = Math.max(1, Math.round(offen * 6 / 60));
+      return '<div class="card ritualkarte"><div><div class="frage">' + offen + (offen === 1 ? ' Buchung wartet' : ' Buchungen warten') + ' auf eine Kategorie</div>' +
+        '<p class="muted small">Eine nach der anderen, mit Vorschlägen · etwa ' + min + ' Min.' + (A.unkat ? ' · Ohne Kategorie fehlen sie in Gewinn und Steuer.' : '') + '</p></div>' +
+        '<button class="btn primary" data-act="ritual">Zuordnen</button></div>';
+    }
+    var letzt = D.meta.letzterImport ? ' · letzter Import ' + new Date(D.meta.letzterImport).toLocaleDateString('de-DE') : '';
+    return '<div class="card ritualkarte still"><div><div class="frage"><span class="haken">✓</span> Alles zugeordnet</div><p class="muted small">Neue Umsätze einfach importieren' + letzt + '</p></div>' +
+      '<button class="btn" data-act="csv">Importieren</button></div>';
+  }
+
+  // Was wäre, wenn …: Regler direkt im Satz, Ergebnis nach Steuer sofort
+  function wennRechne(A) {
+    var w = ui.wenn, hon = honorar(), AW = nz(D.settings.arbeitswochen) || 42;
+    var wochenUmsatz = ((A.prog.kvn || 0) + (A.prog.privat || 0)) / AW;
+    var dUmsatz = w.sitz * hon * AW - w.urlaub * (wochenUmsatz + w.sitz * hon);
+    var dGewinn = dUmsatz - w.ausg * 12;
+    var e2 = JSON.parse(JSON.stringify(A.eingabe));
+    e2.a.gewinn += dGewinn;
+    var R2 = Steuer.berechne(e2);
+    var dSteuer = R2.gesamt - A.R.gesamt;
+    return { dGewinn: dGewinn, dSteuer: dSteuer, dNetto: dGewinn - dSteuer, hon: hon, AW: AW, wochenUmsatz: wochenUmsatz, grenz: A.R.grenz };
+  }
+  function wennErgebnis(A) {
+    var r = wennRechne(A), w = ui.wenn;
+    if (!w.sitz && !w.urlaub && !w.ausg) {
+      var e1 = JSON.parse(JSON.stringify(A.eingabe)); e1.a.gewinn += 1000;
+      var proEuro = 1 - (Steuer.berechne(e1).gesamt - A.R.gesamt) / 1000;
+      return '<p class="wennerg">Schieb an den Reglern. <span class="muted">Zur Orientierung: Von jedem zusätzlichen Euro Gewinn blieben dir derzeit etwa <b>' + Math.round(Math.max(0, Math.min(1, proEuro)) * 100) + ' Cent</b>.</span></p>';
+    }
+    if (w.sitz && !r.hon) return '<p class="wennerg">Trag unten dein <b>Honorar je Sitzung</b> ein, dann rechne ich die zusätzlichen Sitzungen aus.</p>';
+    var plus = r.dGewinn >= 0;
+    var cent = r.dGewinn ? Math.round(r.dNetto / r.dGewinn * 100) : 0;
+    return '<p class="wennerg">Dann hättest du im Jahr <b class="' + (plus ? 'pos' : 'neg') + '">' + eur(Math.abs(r.dGewinn)) + ' ' + (plus ? 'mehr' : 'weniger') + '</b> Gewinn. ' +
+      (plus ? 'Davon gingen ' + eur(r.dSteuer) + ' an Steuern – <b>dir blieben ' + eur(r.dNetto) + '</b>' : 'Die Steuer sänke um ' + eur(-r.dSteuer) + ' – <b>dir blieben ' + eur(-r.dNetto) + ' weniger</b>') +
+      ' (≈ ' + eur(Math.abs(r.dNetto) / 12) + ' im Monat).' + (cent && plus ? ' Von jedem zusätzlichen Euro bleiben ' + cent + ' Cent.' : '') + '</p>';
+  }
+  function kartenWenn(A) {
+    var w = ui.wenn, hon = honorar(), AW = nz(D.settings.arbeitswochen) || 42;
+    var regler = function (k, min, max, step, text) {
+      return '<span class="regler"><input type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + w[k] + '" data-wenn="' + k + '" aria-label="' + text + '"><output id="wenn-' + k + '">' + wennLabel(k, w[k]) + '</output></span>';
+    };
+    var h = '<div class="wenn"><div class="wennzeilen">' +
+      '<div class="wennzeile"><span>Sitzungen pro Woche</span>' + regler('sitz', -6, 10, 1, 'Sitzungen pro Woche') + '</div>' +
+      '<div class="wennzeile"><span>Urlaub im Jahr</span>' + regler('urlaub', -4, 8, 1, 'Urlaubswochen') + '</div>' +
+      '<div class="wennzeile"><span>Praxisausgaben pro Monat</span>' + regler('ausg', -500, 1500, 50, 'Ausgaben pro Monat') + '</div></div>' +
+      '<div id="wenn-erg">' + wennErgebnis(A) + '</div>' +
+      '<div class="row wennbasis"><label class="f"><span>Honorar je Sitzung (€)</span><input type="number" inputmode="decimal" step="1" data-bind="settings.honorar" value="' + (nz(D.settings.honorar) || hon || '') + '"' + (hon ? '' : ' class="fehlt" placeholder="bitte eintragen"') + '></label>' +
+      '<label class="f"><span>Arbeitswochen im Jahr</span><input type="number" inputmode="numeric" step="1" data-bind="settings.arbeitswochen" value="' + AW + '"></label>' +
+      (w.sitz || w.urlaub || w.ausg ? '<div><button class="btn small" data-act="wenn-null">Zurücksetzen</button></div>' : '') + '</div>' +
+      '<p class="muted small">Gerechnet aufs ganze Jahr ' + A.Y + ' mit deiner Hochrechnung als Basis. Urlaub: je Woche fällt der durchschnittliche Wochenumsatz aus KV und Privat weg (' + eur(wennRechne(A).wochenUmsatz) + '). Beiträge zu Versorgungswerk und Krankenversicherung bleiben unverändert angenommen.</p></div>';
+    return h;
+  }
+  function wennLabel(k, v) {
+    v = +v;
+    if (k === 'sitz') return v === 0 ? 'gleich viele' : (v > 0 ? v + ' mehr' : -v + ' weniger');
+    if (k === 'urlaub') return v === 0 ? 'gleich viel' : (v > 0 ? v + ' Woche' + (v > 1 ? 'n' : '') + ' mehr' : -v + ' Woche' + (v < -1 ? 'n' : '') + ' weniger');
+    if (k === 'ausg') return v === 0 ? '0 €' : (v > 0 ? '+' : '−') + eur(Math.abs(v));
+    return v;
+  }
+
+  function installHinweis() {
+    if (istApp() || !schmal()) return '';
+    try { if (localStorage.getItem('fk.installHinweis') === 'weg') return ''; } catch (e) { /* ignorieren */ }
+    if (installEvt) return '<div class="note install"><div><b>Als App installieren?</b> Dann startet der Finanzkompass ohne Adressleiste – wie eine normale App.</div><div class="btns"><button class="btn primary small" data-act="installieren">Installieren</button><button class="btn small" data-act="install-weg">Später</button></div></div>';
+    return '<div class="note install"><div>Du nutzt den Finanzkompass im Browser. <b>Als App:</b> Chrome-Menü ⋮ → „App installieren“. Ist sie schon installiert, öffne sie über ihr App-Symbol.</div><div class="btns"><button class="btn small" data-act="install-weg">Verstanden</button></div></div>';
+  }
+
   function viewUebersicht() {
     var A = auswertung(ui.jahr), Y = ui.jahr;
-    var h = '<h1>Übersicht ' + Y + '</h1>';
+    var h = installHinweis() + '<h1>Übersicht ' + Y + '</h1>';
     if (!D.buchungen.length) {
-      return h + '<p class="lead">Noch keine Buchungen. Starte mit dem CSV-Import der apoBank-Umsätze oder lege Buchungen von Hand an.</p>' +
+      return h + '<p class="lead">Noch keine Buchungen. Starte mit dem Import der apoBank-Umsätze (Excel oder CSV) oder lege Buchungen von Hand an.</p>' +
         '<div class="card"><div class="btns"><button class="btn primary" data-act="csv">Kontoumsätze importieren (Excel/CSV)</button><button class="btn" data-act="neu">Buchung anlegen</button>' +
         (hatFS ? '<button class="btn" data-act="datei-neu">Datendatei anlegen</button><button class="btn" data-act="datei-oeffnen">Vorhandene Datendatei öffnen</button>' : '<button class="btn" data-act="import-json">Datensicherung einlesen</button>') +
         '</div></div>';
     }
     var stand = A.vergangen ? 'Abgeschlossenes Jahr' : A.zukunft ? 'Planjahr ohne Ist-Daten' :
-      'Ist-Daten bis ' + datumDE(A.stichtag) + ' (' + pct(A.t, 0) + ' des Jahres) · Hochrechnung: ' + ({ linear: 'linear', sitzungen: 'über Sitzungen', manuell: 'manuelle Planwerte' })[D.hochrechnung.methode];
+      'Stand ' + datumDE(A.stichtag) + ' · ' + pct(A.t, 0) + ' des Jahres · Rest hochgerechnet ' + ({ linear: 'linear', sitzungen: 'über Sitzungen', manuell: 'mit Planwerten' })[D.hochrechnung.methode];
     h += '<p class="lead">' + stand + '</p>';
-    if (A.unkat) h += '<div class="note warn"><b>' + A.unkat + ' Buchungen ohne Kategorie.</b> Sie fehlen in Gewinn und Steuer. <a href="#" data-act="zeige-unkat">Jetzt zuordnen</a></div>';
     if (fileHandle && dateiStatus === 'erlaubnis') h += '<div class="note warn"><b>Dateizugriff erneut erlauben.</b> Der Browser verlangt nach dem Neustart eine Bestätigung. <a href="#" data-act="datei-erlauben">Erlauben</a></div>';
     if (A.R.avUeberHB > 0) h += '<div class="note bad"><b>Altersvorsorge über dem Höchstbetrag:</b> ' + eur(A.R.avUeberHB) + ' wirken steuerlich nicht.</div>';
 
-    h += '<div class="tiles">' +
-      tile('Verfügbar pro Monat' + (A.t < 1 ? ' (Prognose)' : ''), eur(A.verfuegbar / 12), 'nach Steuern und privater Vorsorge' + (st(Y).zusammen ? ' · Haushalt' : ''), 'hero') +
+    h += '<div class="antworten">' +
+      '<div class="card hero">' + antwortBleibt(A) + '</div>' +
+      '<div class="card">' + antwortSteuer(A) + '</div>' +
+      '<div class="card">' + antwortKurs(A) + '</div>' +
+      '</div>';
+    h += karteZuordnen(A);
+    if (!A.vergangen) h += aufklapp('wenn', 'Was wäre, wenn …', kartenWenn(A), true);
+
+    // Details (zweite Ebene)
+    var tiles = '<div class="tiles">' +
       tile('Steuerlicher Gewinn', eur(A.P.gewinn), A.t < 1 ? 'Ist ' + eur(A.I.gewinn) : 'EÜR') +
       tile('Steuern ' + Y, eur(A.R.gesamt), 'ESt, Soli, KiSt · Ø ' + pct(A.R.durchschnitt) + ' · Grenz ' + pct(A.R.grenz, 0)) +
       tile('Noch zu zahlen', eur(A.nochZuZahlen), 'offene Vorauszahlungen + erwartete Nachzahlung') +
       tile('Rücklage pro Monat', eur(A.ruecklageMonat), A.monateRest + ' Monat(e) bis Jahresende') +
       '</div>';
+    h += aufklapp('zahlen', 'Kennzahlen', tiles);
+    h += aufklapp('monate', 'Einnahmen und Ausgaben je Monat', monatsChart(A.mon));
 
-    h += '<div class="card"><h2>Einnahmen und Ausgaben je Monat</h2>' + monatsChart(A.mon) + '</div>';
-
-    // Tabelle Ist / Prognose
     var zeile = function (n, i, p, cls) { return '<tr class="' + (cls || '') + '"><td' + (cls === 'sub' ? ' class="indent"' : '') + '>' + n + '</td><td class="num">' + eur(i) + '</td>' + (A.t < 1 ? '<td class="num">' + eur(p) + '</td>' : '') + '</tr>'; };
     var t = '<div class="tablewrap"><table><thead><tr><th></th><th class="num">Ist</th>' + (A.t < 1 ? '<th class="num">Prognose</th>' : '') + '</tr></thead><tbody>';
     t += zeile('<b>Betriebseinnahmen</b>', A.I.ein, A.P.ein);
@@ -726,9 +922,8 @@
     t += zeile('Anschaffungen (Abfluss)', -A.I.inv, -A.P.inv, 'sub');
     t += zeile('<b>Cashflow-Überschuss Praxis</b>', A.I.cashflow, A.P.cashflow, 'sum');
     t += '</tbody></table></div>';
-    h += '<div class="card"><h2>Ergebnis</h2>' + t + '</div>';
+    h += aufklapp('ergebnis', 'Ergebnis (EÜR)', t);
 
-    // Vom Cashflow zum verfügbaren Betrag
     var v = '<table><tbody>';
     v += '<tr><td>Cashflow-Überschuss Praxis</td><td class="num">' + eur(A.P.cashflow) + '</td></tr>';
     if (A.lohnNetto) v += '<tr><td>+ Lohn aus Anstellung (nach Sozialabgaben)</td><td class="num">' + eur(A.lohnNetto) + '</td></tr>';
@@ -740,8 +935,8 @@
     v += '<tr class="sum"><td>Verfügbar im Jahr</td><td class="num">' + eur(A.verfuegbar) + '</td></tr>';
     v += '<tr><td>Verfügbar pro Monat</td><td class="num">' + eur(A.verfuegbar / 12) + '</td></tr>';
     v += '</tbody></table>';
-    h += '<div class="card"><h2>Vom Cashflow zum verfügbaren Betrag</h2>' + v +
-      '<p class="muted small">Steuerrücklage: von jedem Euro Gewinn rund ' + Math.round(A.ruecklageQuote * 100) + ' Cent für Steuern zurücklegen.</p></div>';
+    h += aufklapp('cashflow', 'Vom Cashflow zum verfügbaren Betrag', v);
+    if (!A.unkat && D.buchungen.length) meilenstein('zugeordnet-' + (D.meta.letzterImport || 'start'), 'Alles zugeordnet. Die Zahlen sind vollständig.');
     return h;
   }
 
@@ -764,7 +959,7 @@
     var f = ui.filter, liste = buchungenGefiltert();
     var summe = liste.reduce(function (s, b) { return s + b.betrag; }, 0);
     var h = '<h1>Buchungen ' + ui.jahr + '</h1><p class="lead">Kategorie direkt in der Liste ändern; Klick auf eine Buchung öffnet alle Felder.</p>';
-    h += '<div class="btns" style="margin:0 0 14px"><button class="btn primary" data-act="neu">Buchung anlegen</button><button class="btn" data-act="csv">Excel/CSV importieren</button><button class="btn" data-act="regeln-anwenden">Regeln auf leere anwenden</button></div>';
+    h += '<div class="btns" style="margin:0 0 14px"><button class="btn primary" data-act="neu">Buchung anlegen</button><button class="btn" data-act="csv">Excel/CSV importieren</button><button class="btn" data-act="regeln-anwenden">Regeln auf leere anwenden</button>' + (function () { var n = D.buchungen.filter(function (b) { return !b.kat; }).length; return n ? '<button class="btn" data-act="ritual">Zuordnen (' + n + ')</button>' : ''; })() + '</div>';
     h += '<div class="filters">' +
       '<select id="f-monat" data-filter="monat"><option value="">Alle Monate</option>' + MONATE.map(function (m, i) { return '<option value="' + (i + 1) + '"' + (+f.monat === i + 1 ? ' selected' : '') + '>' + m + '</option>'; }).join('') + '</select>' +
       '<select id="f-kat" data-filter="kat"><option value="">Alle Kategorien</option><option value="_leer"' + (f.kat === '_leer' ? ' selected' : '') + '>Ohne Kategorie</option>' +
@@ -1075,6 +1270,7 @@
     D.buchungen = D.buchungen.concat(zusatz);
     var gelernt = csv.map.kat && csv.lernen ? regelnLernen(r.liste) : 0;
     D.csvMapping = Object.assign({}, csv.map);
+    D.meta.letzterImport = new Date().toISOString();
     $('#dlg').close();
     var jahre = r.liste.map(function (b) { return +b.datum.slice(0, 4); });
     if (jahre.length && jahre.indexOf(ui.jahr) < 0) ui.jahr = Math.max.apply(null, jahre);
@@ -1312,6 +1508,7 @@
     h += '<p class="muted small">Stand der Daten: ' + new Date(D.meta.geaendert).toLocaleString('de-DE') + ' · ' + D.buchungen.length + ' Buchungen · ' + D.regeln.length + ' Regeln</p>';
     h += '<div class="btns"><button class="btn" data-act="export-json">Datensicherung herunterladen</button><button class="btn" data-act="import-json">Datensicherung einlesen</button><button class="btn" data-act="csv">Kontoumsätze importieren (Excel/CSV)</button></div></div>';
 
+    h += installKarte();
     // Regeln
     h += '<div class="card"><h2>Regeln für die Kategorisierung</h2><p class="muted small">Die erste passende Regel gilt. IBAN: exakter Vergleich; Name, Verwendungszweck, beides: enthält den Text.</p>';
     if (D.regeln.length) {
@@ -1340,6 +1537,134 @@
   }
 
   var VIEWS = { uebersicht: viewUebersicht, buchungen: viewBuchungen, steuer: viewSteuer, kvn: viewKVN, planung: viewPlanung, daten: viewDaten };
+
+  // ---------------------------------------------------------------- Zuordnen: eine Buchung nach der anderen
+  var ritual = null;
+  function nameKey(b) { return String(b.gegenpartei || '').trim().toLowerCase(); }
+  function vorschlaege(b) {
+    var zaehl = {}, add = function (k, w) { if (k) zaehl[k] = (zaehl[k] || 0) + w; };
+    var nk = nameKey(b), ib = normIBAN(b.iban);
+    D.buchungen.forEach(function (x) {
+      if (!x.kat || x === b) return;
+      if (nk && nameKey(x) === nk) add(x.kat, 100);
+      else if (ib && normIBAN(x.iban) === ib) add(x.kat, 80);
+      else if ((x.betrag > 0) === (b.betrag > 0)) add(x.kat, 1);
+    });
+    var liste = Object.keys(zaehl).sort(function (a, c) { return zaehl[c] - zaehl[a]; });
+    // Fallback: passende Gruppe nach Vorzeichen
+    (b.betrag > 0 ? ['kvn', 'privat', 'sonst_be', 'privat_ein'] : ['sonst_ba', 'buero', 'fortbildung', 'privat_aus']).forEach(function (k) { if (liste.indexOf(k) < 0) liste.push(k); });
+    return liste.slice(0, 4);
+  }
+  function ritualStart() {
+    var ids = D.buchungen.filter(function (b) { return !b.kat; })
+      .sort(function (a, b) { return a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : 0; }).map(function (b) { return b.id; });
+    if (!ids.length) { toast('Alles zugeordnet ✓'); return; }
+    ritual = { ids: ids, pos: 0, erledigt: 0, regeln: 0, skip: 0, undo: null, start: ids.length };
+    var dlg = $('#dlg'); dlg.className = 'ritual';
+    ritualZeigen();
+    dlg.showModal();
+    dlg.onclose = function () { ritual = null; render(); };
+  }
+  function ritualAktuell() {
+    while (ritual.pos < ritual.ids.length) {
+      var b = D.buchungen.filter(function (x) { return x.id === ritual.ids[ritual.pos]; })[0];
+      if (b && !b.kat) return b;
+      ritual.pos++;
+    }
+    return null;
+  }
+  function ritualZeigen(richtung) {
+    var dlg = $('#dlg'), b = ritualAktuell();
+    var fertig = ritual.ids.length, n = Math.min(ritual.pos + 1, fertig);
+    var kopf = '<div class="rkopf"><div class="rbar"><i style="width:' + (ritual.pos / Math.max(1, fertig) * 100).toFixed(1) + '%"></i></div>' +
+      '<span class="muted small">' + (b ? n + ' von ' + fertig : 'Fertig') + '</span><button class="x" data-act="r-zu" aria-label="Schließen">×</button></div>';
+    if (!b) {
+      var offen = D.buchungen.filter(function (x) { return !x.kat; }).length;
+      dlg.innerHTML = kopf + '<div class="rende"><div class="rhaken">✓</div><h2>' + (offen ? 'Für heute erledigt' : 'Alles erledigt') + '</h2>' +
+        '<p>' + ritual.erledigt + ' Buchung' + (ritual.erledigt === 1 ? '' : 'en') + ' zugeordnet' + (ritual.regeln ? ' · ' + ritual.regeln + ' Regel' + (ritual.regeln === 1 ? '' : 'n') + ' gelernt – beim nächsten Import geht es schneller' : '') + '.</p>' +
+        (offen ? '<p class="muted small">' + offen + ' übersprungen – die warten auf ein andermal.</p>' : '') +
+        '<div class="btns" style="justify-content:center">' + (offen ? '<button class="btn" data-act="r-nochmal">Übersprungene ansehen</button>' : '') + '<button class="btn primary" data-act="r-zu">Fertig</button></div></div>';
+      return;
+    }
+    var vs = vorschlaege(b), nk = nameKey(b);
+    var weitere = nk ? D.buchungen.filter(function (x) { return !x.kat && x !== b && nameKey(x) === nk; }).length : 0;
+    var hist = nk ? D.buchungen.filter(function (x) { return x.kat && nameKey(x) === nk; }) : [];
+    var eindeutig = hist.every(function (x) { return x.kat === (hist[0] || {}).kat; });
+    var regelDa = !!regelFuer(b);
+    dlg.innerHTML = kopf +
+      '<div class="rkarte' + (richtung ? ' rein-' + richtung : '') + '" id="rkarte">' +
+      '<div class="rmeta">' + datumDE(b.datum) + (b.art ? ' · ' + esc(b.art) : '') + '</div>' +
+      '<div class="rbetrag ' + (b.betrag < 0 ? 'neg' : 'pos') + '">' + eur(b.betrag, 2) + '</div>' +
+      '<div class="rname">' + esc(b.gegenpartei || 'Ohne Namen') + '</div>' +
+      '<div class="rtext">' + esc(b.text || '') + '</div></div>' +
+      '<div class="rfrage">Wohin gehört das?</div>' +
+      '<div class="chips">' + vs.map(function (k, i) { return '<button class="chip" data-act="r-kat" data-k="' + k + '"><span class="kbd">' + (i + 1) + '</span>' + esc(katName(k)) + '</button>'; }).join('') + '</div>' +
+      '<select id="r-andere" aria-label="Andere Kategorie">' + '<option value="">Andere Kategorie …</option>' + katOptions('', false) + '</select>' +
+      (nk && !regelDa ? '<label class="chk"><input type="checkbox" id="r-regel"' + (eindeutig ? ' checked' : '') + '> Künftig „' + esc(b.gegenpartei) + '“ automatisch so zuordnen</label>' : '') +
+      (weitere ? '<label class="chk"><input type="checkbox" id="r-alle" checked> Auch die ' + weitere + ' weitere' + (weitere === 1 ? '' : 'n') + ' offene' + (weitere === 1 ? '' : 'n') + ' Buchung' + (weitere === 1 ? '' : 'en') + ' von „' + esc(b.gegenpartei) + '“</label>' : '') +
+      '<div class="rfuss">' + (ritual.undo ? '<button class="btn small" data-act="r-undo">↶ Rückgängig</button>' : '<span></span>') +
+      '<button class="btn small" data-act="r-skip">Überspringen →</button></div>' +
+      '<p class="muted small rtipp">Tipp: Karte nach links wischen = überspringen' + (schmal() ? '' : ' · Tasten 1–4 wählen') + '</p>';
+    var karte = $('#rkarte');
+    var x0 = null, dx = 0;
+    karte.addEventListener('pointerdown', function (e) { x0 = e.clientX; dx = 0; karte.setPointerCapture(e.pointerId); });
+    karte.addEventListener('pointermove', function (e) { if (x0 === null) return; dx = e.clientX - x0; if (dx < 0) karte.style.transform = 'translateX(' + dx + 'px) rotate(' + (dx / 40) + 'deg)'; });
+    var ende = function () { if (x0 === null) return; x0 = null; if (dx < -90) ritualWeiter('skip'); else karte.style.transform = ''; };
+    karte.addEventListener('pointerup', ende); karte.addEventListener('pointercancel', ende);
+  }
+  function ritualZuordnen(k) {
+    var b = ritualAktuell(); if (!b || !k) return;
+    var mitAlle = $('#r-alle') && $('#r-alle').checked, mitRegel = $('#r-regel') && $('#r-regel').checked;
+    var betroffen = [b];
+    if (mitAlle) D.buchungen.forEach(function (x) { if (!x.kat && x !== b && nameKey(x) === nameKey(b)) betroffen.push(x); });
+    betroffen.forEach(function (x) { x.kat = k; });
+    var regelId = null;
+    if (mitRegel) { regelId = uid(); D.regeln.push({ id: regelId, feld: 'name', muster: String(b.gegenpartei).trim(), kat: k }); ritual.regeln++; }
+    ritual.undo = { ids: betroffen.map(function (x) { return x.id; }), regelId: regelId, pos: ritual.pos };
+    ritual.erledigt += betroffen.length;
+    save();
+    ritualWeiter('ok');
+  }
+  function ritualWeiter(art) {
+    var karte = $('#rkarte');
+    var weiter = function () { ritual.pos++; ritualZeigen('rechts'); };
+    if (karte && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      karte.classList.add(art === 'skip' ? 'raus-links' : 'raus-oben');
+      setTimeout(weiter, 180);
+    } else weiter();
+  }
+  function ritualRueckgaengig() {
+    var u = ritual.undo; if (!u) return;
+    D.buchungen.forEach(function (x) { if (u.ids.indexOf(x.id) >= 0) x.kat = ''; });
+    if (u.regelId) { D.regeln = D.regeln.filter(function (r) { return r.id !== u.regelId; }); ritual.regeln--; }
+    ritual.erledigt -= u.ids.length;
+    ritual.pos = u.pos; ritual.undo = null;
+    save(); ritualZeigen('links');
+  }
+  document.addEventListener('keydown', function (e) {
+    if (!ritual || !$('#dlg').open || /input|select|textarea/i.test((e.target || {}).tagName)) return;
+    var chips = $$('#dlg .chip');
+    if (/^[1-4]$/.test(e.key) && chips[+e.key - 1]) { e.preventDefault(); ritualZuordnen(chips[+e.key - 1].dataset.k); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); ritualWeiter('skip'); }
+  });
+
+  // ---------------------------------------------------------------- Installation als App
+  var installEvt = null;
+  function istApp() { return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true; }
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvt = e; if (ui.tab === 'uebersicht' || ui.tab === 'daten') render(); });
+  window.addEventListener('appinstalled', function () { installEvt = null; toast('Installiert. Öffne den Finanzkompass künftig über sein App-Symbol.'); render(); });
+  function installieren() {
+    if (!installEvt) { toast('Chrome-Menü ⋮ → „App installieren“'); return; }
+    installEvt.prompt();
+    installEvt.userChoice.then(function () { installEvt = null; render(); }).catch(function () {});
+  }
+  function installKarte() {
+    var h = '<div class="card"><h2>Als App nutzen</h2>';
+    if (istApp()) return h + '<p><span class="haken">✓</span> Läuft als installierte App.</p></div>';
+    if (installEvt) return h + '<p>Installiert startet der Finanzkompass ohne Adressleiste, mit eigenem Symbol und offline.</p><div class="btns"><button class="btn primary" data-act="installieren">App installieren</button></div></div>';
+    return h + '<p>Du nutzt den Finanzkompass gerade im Browser.</p><ol class="small"><li>Chrome-Menü ⋮ → <b>„App installieren“</b> (nicht „Verknüpfung erstellen“ – die öffnet nur einen Browser-Tab).</li>' +
+      '<li>Danach immer über das <b>App-Symbol</b> starten.</li><li>Meldet Chrome „bereits installiert“, die App aber startet nicht: in den Android-Einstellungen unter Apps „Finanzkompass“ deinstallieren und neu installieren. Vorher hier eine Datensicherung herunterladen.</li></ol></div>';
+  }
 
   // ---------------------------------------------------------------- Toast
   var toastTimer = null;
@@ -1390,6 +1715,15 @@
         D.buchungen = D.buchungen.filter(function (b) { return !wegIds[b.id]; });
         save(); toast(weg.length + ' Buchungen gelöscht'); break;
       }
+      case 'ritual': ritualStart(); break;
+      case 'r-kat': ritualZuordnen(a.dataset.k); break;
+      case 'r-skip': ritualWeiter('skip'); break;
+      case 'r-undo': ritualRueckgaengig(); break;
+      case 'r-zu': $('#dlg').close(); break;
+      case 'r-nochmal': { $('#dlg').close(); setTimeout(ritualStart, 50); break; }
+      case 'installieren': installieren(); break;
+      case 'install-weg': { try { localStorage.setItem('fk.installHinweis', 'weg'); } catch (e2) { /* ignorieren */ } render(); break; }
+      case 'wenn-null': ui.wenn = { sitz: 0, urlaub: 0, ausg: 0 }; render(); break;
       case 'auswahl-an': ui.auswahl = {}; render(); break;
       case 'auswahl-aus': ui.auswahl = null; render(); break;
       case 'auswahl-keine': ui.auswahl = {}; render(); break;
@@ -1488,6 +1822,8 @@
     if (el.id === 'jahr') { ui.jahr = +el.value; ui.filter.limit = 200; render(); return; }
     if (el.id === 'sz-wahl') { ui.szId = el.value; render(); return; }
     if (el.dataset.filter) { ui.filter[el.dataset.filter] = el.value; ui.filter.limit = 200; render(); return; }
+    if (el.id === 'r-andere') { if (el.value) ritualZuordnen(el.value); return; }
+    if (el.id === 'r-regel' || el.id === 'r-alle' || el.dataset.wenn) return;
     if (el.id === 'auswahl-kat' && el.value && ui.auswahl) {
       var gw = buchungenGefiltert().filter(function (b) { return ui.auswahl[b.id]; });
       gw.forEach(function (b) { b.kat = el.value; });
@@ -1512,6 +1848,12 @@
     }
   });
   document.addEventListener('input', function (e) {
+    if (e.target.dataset && e.target.dataset.wenn) {
+      var k = e.target.dataset.wenn; ui.wenn[k] = +e.target.value;
+      var o = document.getElementById('wenn-' + k); if (o) o.textContent = wennLabel(k, ui.wenn[k]);
+      var erg = $('#wenn-erg'); if (erg) erg.innerHTML = wennErgebnis(auswertung(ui.jahr));
+      return;
+    }
     if (e.target.id === 'f-suche') {
       ui.filter.suche = e.target.value; ui.filter.limit = 200;
       clearTimeout(document.__suchT);
@@ -1521,6 +1863,9 @@
       }, 250);
     }
   });
+  document.addEventListener('toggle', function (e) {
+    var d = e.target; if (d && d.dataset && d.dataset.auf) ui.offen[d.dataset.auf] = d.open;
+  }, true);
   window.addEventListener('hashchange', function () {
     var t = location.hash.replace('#', '');
     if (VIEWS[t] && t !== ui.tab) { ui.tab = t; render(); }
@@ -1528,6 +1873,7 @@
 
   // ---------------------------------------------------------------- Start
   render();
+  if (/[?&]aktion=zuordnen/.test(location.search)) { history.replaceState(null, '', location.pathname + location.hash); setTimeout(ritualStart, 300); }
   if (hatFS) {
     idbGet('handle').then(function (h) {
       if (!h) return;
