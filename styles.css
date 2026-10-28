@@ -205,6 +205,10 @@ input.inline { padding: 5px 6px; text-align: right; min-width: 90px; }
 .note.warn { background: var(--warn-soft); color: var(--ink); }
 .note.bad { background: var(--bad-soft); color: var(--ink); }
 .note b { color: var(--ink); }
+.chk { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; font-size: 13.5px; line-height: 1.4; cursor: pointer; }
+.listkopf { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 0 0 8px; }
+.listkopf p { margin: 0; }
+.chk input { margin-top: 3px; flex: none; }
 
 /* Buchungsliste */
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }

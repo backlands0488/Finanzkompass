@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.1.1';
+  var APP_VERSION = '1.2.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -78,6 +78,10 @@
   function gruppe(kat) { return kat && KATMAP[kat] ? KATMAP[kat].gruppe : null; }
   function katName(kat) { return kat && KATMAP[kat] ? KATMAP[kat].name : 'Ohne Kategorie'; }
   function katsIn(g) { return KAT.filter(function (k) { return k.gruppe === g; }); }
+  // Kategorie aus Freitext (Import): akzeptiert Kürzel (z. B. "kvn") oder Anzeigename (z. B. "KVN-Honorar")
+  function katNorm(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9äöüß]/g, ''); }
+  var KATTEXT = {}; KAT.forEach(function (k) { KATTEXT[katNorm(k.id)] = k.id; KATTEXT[katNorm(k.name)] = k.id; });
+  function katAusText(s) { var n = katNorm(s); return n ? (KATTEXT[n] || null) : ''; }
   function katOptions(sel, mitLeer) {
     var h = mitLeer !== false ? '<option value=""' + (!sel ? ' selected' : '') + '>– ohne Kategorie –</option>' : '';
     GRUPPEN.forEach(function (g) {
@@ -767,7 +771,8 @@
       KAT.map(function (k) { return '<option value="' + k.id + '"' + (f.kat === k.id ? ' selected' : '') + '>' + esc(k.name) + '</option>'; }).join('') + '</select>' +
       '<input type="text" id="f-suche" data-filter="suche" placeholder="Suche (Name, Text, Betrag)" value="' + esc(f.suche) + '">' +
       '</div>';
-    h += '<p class="muted small">' + liste.length + ' Buchungen · Summe ' + eur(summe, 2) + '</p>';
+    h += '<div class="listkopf"><p class="muted small">' + liste.length + ' Buchungen · Summe ' + eur(summe, 2) + '</p>' +
+      (liste.length ? '<button class="btn small danger" data-act="loeschen-angezeigt">Angezeigte löschen (' + liste.length + ')</button>' : '') + '</div>';
     if (!liste.length) return h + '<div class="card empty">Keine Buchungen für diese Auswahl.</div>';
     h += '<div class="card" style="padding:4px 12px"><ul class="blist">';
     liste.slice(0, f.limit).forEach(function (b) {
@@ -854,7 +859,8 @@
   function csvDialog() {
     var dlg = $('#dlg'); dlg.className = 'wide';
     csv = { typ: 'csv', zeilen: [], rows: [], blaetter: [], blatt: 0, trenner: ';', kopf: 0,
-      map: Object.assign({ datum: '', betrag: '', soll: '', haben: '', name: '', iban: '', text: '', art: '', modus: 'betrag' }, D.csvMapping || {}) };
+      map: Object.assign({ datum: '', betrag: '', soll: '', haben: '', name: '', iban: '', text: '', art: '', kat: '', sj: '', auf: '', modus: 'betrag' }, D.csvMapping || {}),
+      ueberschreiben: false, lernen: true };
     dlg.innerHTML = '<div class="dhead"><h2>Kontoumsätze importieren</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div>' +
       '<div class="dbody" id="csvbody"><p>Export der apoBank (oder einer anderen Bank) auswählen: Excel (.xlsx) oder CSV. Die Spalten ordnest du im nächsten Schritt zu; die Zuordnung wird für künftige Importe gespeichert.</p>' +
       '<input type="file" id="csvfile" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div><div class="dfoot" id="csvfoot"><button class="btn" data-act="dlg-zu">Abbrechen</button></div>';
@@ -895,6 +901,9 @@
     if (!sp.includes(m.iban)) m.iban = findeSp(/iban|kontonummer/i);
     if (!sp.includes(m.text)) m.text = findeSp(/verwendung|zweck|buchungstext|beschreibung/i);
     if (!sp.includes(m.art)) m.art = findeSp(/auftragsart|buchungsart|umsatzart|vorgang/i);
+    if (!sp.includes(m.kat)) m.kat = findeSp(/^kategorie/i);
+    if (!sp.includes(m.sj)) m.sj = findeSp(/^steuerjahr/i);
+    if (!sp.includes(m.auf)) m.auf = findeSp(/^aufteilung/i);
     var opt = function (sel) { return '<option value="">– keine –</option>' + sp.map(function (s) { return '<option' + (s === sel ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join(''); };
     var h = '<div class="row">';
     if (csv.typ === 'csv') {
@@ -915,27 +924,45 @@
       '<div class="row"><label class="f"><span>Gegenpartei (Name)</span><select data-map="name">' + opt(m.name) + '</select></label>' +
       '<label class="f"><span>IBAN</span><select data-map="iban">' + opt(m.iban) + '</select></label>' +
       '<label class="f"><span>Verwendungszweck</span><select data-map="text">' + opt(m.text) + '</select></label>' +
-      '<label class="f"><span>Buchungsart</span><select data-map="art">' + opt(m.art) + '</select></label></div>';
+      '<label class="f"><span>Buchungsart</span><select data-map="art">' + opt(m.art) + '</select></label></div>' +
+      '<div class="row"><label class="f"><span>Kategorie (optional)</span><select data-map="kat">' + opt(m.kat) + '</select></label>' +
+      '<label class="f"><span>Steuerjahr (optional)</span><select data-map="sj">' + opt(m.sj) + '</select></label>' +
+      '<label class="f"><span>Aufteilung (optional)</span><select data-map="auf">' + opt(m.auf) + '</select></label></div>';
     var vor = csvParse(8);
+    if (m.kat) {
+      var alle = csvParse(0), mitKat = alle.liste.filter(function (b) { return b.kat; }).length;
+      h += '<div class="note">Kategorien aus der Datei: ' + mitKat + ' von ' + alle.liste.length + ' Zeilen zugeordnet' +
+        (alle.unbekannt.length ? '. <b>Unbekannte Kategorie:</b> ' + esc(alle.unbekannt.slice(0, 5).join(', ')) : '') + '</div>' +
+        '<label class="chk"><input type="checkbox" id="csv-ueber"' + (csv.ueberschreiben ? ' checked' : '') + '> Bereits importierte Buchungen: auch vorhandene Kategorien überschreiben (sonst nur leere ergänzen)</label>' +
+        '<label class="chk"><input type="checkbox" id="csv-lernen"' + (csv.lernen ? ' checked' : '') + '> Regeln lernen: Gegenparteien mit eindeutiger Kategorie künftig automatisch zuordnen</label>';
+    }
     h += '<h3>Vorschau</h3>';
     if (vor.fehler.length && !vor.liste.length) h += '<div class="note bad">' + esc(vor.fehler[0]) + '</div>';
-    h += '<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Gegenpartei</th><th>Verwendungszweck</th><th class="num">Betrag</th><th>Kategorie (Regel)</th></tr></thead><tbody>' +
-      vor.liste.map(function (b) { var r = regelFuer(b); return '<tr><td>' + datumDE(b.datum) + '</td><td>' + esc(b.gegenpartei) + '</td><td class="small">' + esc(String(b.text || b.art || '').slice(0, 70)) + '</td><td class="num">' + eur(b.betrag, 2) + '</td><td class="small">' + (r ? esc(katName(r.kat)) : '–') + '</td></tr>'; }).join('') +
+    h += '<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Gegenpartei</th><th>Verwendungszweck</th><th class="num">Betrag</th><th>Kategorie</th></tr></thead><tbody>' +
+      vor.liste.map(function (b) { var r = regelFuer(b), kn = b.kat ? katName(b.kat) : (r ? katName(r.kat) + ' (Regel)' : '–'); return '<tr><td>' + datumDE(b.datum) + '</td><td>' + esc(b.gegenpartei) + '</td><td class="small">' + esc(String(b.text || b.art || '').slice(0, 70)) + '</td><td class="num">' + eur(b.betrag, 2) + '</td><td class="small">' + esc(kn) + '</td></tr>'; }).join('') +
       '</tbody></table></div>';
     $('#csvbody').innerHTML = h;
     $('#csvfoot').innerHTML = '<button class="btn" data-act="dlg-zu">Abbrechen</button><button class="btn primary" data-act="csv-import">Importieren</button>';
     if ($('#csv-tr')) $('#csv-tr').onchange = function (e) { csv.trenner = e.target.value; csvZeilenNeu(); csvMappingZeigen(); };
     if ($('#csv-blatt')) $('#csv-blatt').onchange = function (e) { csv.blatt = +e.target.value; csvZeilenNeu(); csvMappingZeigen(); };
     $('#csv-kopf').onchange = function (e) { csv.kopf = Math.max(0, nz(e.target.value) - 1); csvMappingZeigen(); };
+    if ($('#csv-ueber')) $('#csv-ueber').onchange = function (e) { csv.ueberschreiben = e.target.checked; };
+    if ($('#csv-lernen')) $('#csv-lernen').onchange = function (e) { csv.lernen = e.target.checked; };
     $$('[data-map]', $('#csvbody')).forEach(function (s) { s.onchange = function () { csv.map[s.dataset.map] = s.value; csvMappingZeigen(); }; });
   }
   function csvParse(limit) {
     var sp = csvSpalten(), m = csv.map, idx = function (n) { return n ? sp.indexOf(n) : -1; };
     var iD = idx(m.datum), iB = idx(m.betrag), iS = idx(m.soll), iH = idx(m.haben), iN = idx(m.name), iI = idx(m.iban), iT = idx(m.text), iA = idx(m.art);
-    var liste = [], fehler = [];
+    var iK = idx(m.kat), iJ = idx(m.sj), iU = idx(m.auf);
+    var liste = [], fehler = [], unbekannt = [];
+    var katLesen = function (s) {
+      var k = katAusText(s);
+      if (k === null) { if (unbekannt.indexOf(s) < 0) unbekannt.push(s); return ''; }
+      return k;
+    };
     if (iD < 0) fehler.push('Bitte die Datumsspalte zuordnen.');
     if (m.modus === 'betrag' ? iB < 0 : (iS < 0 && iH < 0)) fehler.push('Bitte die Betragsspalte(n) zuordnen.');
-    if (fehler.length) return { liste: liste, fehler: fehler };
+    if (fehler.length) return { liste: liste, fehler: fehler, unbekannt: unbekannt };
     for (var i = csv.kopf + 1; i < csv.rows.length; i++) {
       var z = csv.rows[i], wert = function (j) { return j >= 0 ? zellText(z[j]) : ''; };
       var datum = parseDatum(wert(iD));
@@ -947,32 +974,106 @@
         betrag = hb - s;
       }
       if (!datum || isNaN(betrag)) { if (z.join('').trim()) fehler.push('Zeile ' + (i + 1) + ' übersprungen'); continue; }
-      liste.push({ id: uid(), datum: datum, betrag: Math.round(betrag * 100) / 100, gegenpartei: wert(iN), iban: normIBAN(wert(iI)), text: wert(iT), art: wert(iA), kat: '', steuerjahr: '', notiz: '' });
+      var b = { id: uid(), datum: datum, betrag: Math.round(betrag * 100) / 100, gegenpartei: wert(iN), iban: normIBAN(wert(iI)), text: wert(iT), art: wert(iA), kat: '', steuerjahr: '', notiz: '' };
+      if (iK >= 0 && wert(iK)) b.kat = katLesen(wert(iK));
+      var sj = parseInt(wert(iJ), 10); if (sj >= 1990 && sj <= 2100) b.steuerjahr = sj;
+      // Aufteilung, z. B. "Kirchensteuer: 520" oder "Kirchensteuer: 520; Solidaritätszuschlag: 30"
+      if (iU >= 0 && wert(iU)) {
+        b.teile = [];
+        wert(iU).split(/[;\n]/).forEach(function (t) {
+          var mm = t.trim().match(/^(.*?)\s*[:=]?\s*(-?[\d.,]+)\s*€?$/);
+          if (!mm) { if (t.trim()) fehler.push('Zeile ' + (i + 1) + ': Aufteilung „' + t.trim() + '“ nicht lesbar'); return; }
+          var tk = katLesen(mm[1]), tb = Math.abs(parseBetrag(mm[2]));
+          if (tk && tb > 0) b.teile.push({ kat: tk, betrag: tb });
+        });
+        var summeTeile = b.teile.reduce(function (s, t) { return s + t.betrag; }, 0);
+        if (summeTeile >= Math.abs(b.betrag) - 0.004) { fehler.push('Zeile ' + (i + 1) + ': Aufteilung ist so groß wie der Betrag – ignoriert'); b.teile = []; }
+        if (!b.teile.length) delete b.teile;
+      }
+      liste.push(b);
       if (limit && liste.length >= limit) break;
     }
-    return { liste: liste, fehler: fehler };
+    return { liste: liste, fehler: fehler, unbekannt: unbekannt };
+  }
+  // Teilbuchungen aus einer Aufteilung: Hauptbuchung behält den Rest, jeder Teil wird eigene Buchung mit eigenem Schlüssel
+  function teileAnlegen(b, teile) {
+    var vz = b.betrag < 0 ? -1 : 1, neu = [];
+    teile.forEach(function (t, j) {
+      b.betrag = Math.round((b.betrag - vz * t.betrag) * 100) / 100;
+      neu.push({ id: uid(), datum: b.datum, betrag: vz * t.betrag, gegenpartei: b.gegenpartei, iban: b.iban, text: b.text, art: b.art,
+        kat: t.kat, steuerjahr: b.steuerjahr || '', notiz: 'Aufteilung', importKey: b.importKey + '#' + (j + 1) });
+    });
+    if (neu.length) b.notiz = b.notiz || 'Aufgeteilt';
+    return neu;
+  }
+  // Regeln lernen je Gegenpartei: eindeutige Kategorie, oder bei mind. 4 Buchungen eine klare Mehrheit (≥ 75 %).
+  // Steuerzahlungen werden nicht gelernt, da ESt/KiSt je Bescheid wechseln.
+  function regelnLernen(liste) {
+    var proName = {};
+    liste.forEach(function (b) {
+      var n = String(b.gegenpartei || '').trim(); if (n.length < 3) return;
+      var key = n.toLowerCase();
+      var e = (proName[key] = proName[key] || { name: n, n: 0, kats: {}, probe: b });
+      e.n++; e.kats[b.kat || '_leer'] = (e.kats[b.kat || '_leer'] || 0) + 1;
+    });
+    var kandidaten = [];
+    Object.keys(proName).forEach(function (key) {
+      var e = proName[key], kats = Object.keys(e.kats).sort(function (x, y) { return e.kats[y] - e.kats[x]; }), top = kats[0];
+      if (top === '_leer' || gruppe(top) === 'steuer') return;
+      if (kats.length > 1 && !(e.n >= 4 && e.kats[top] / e.n >= 0.75)) return;
+      if (regelFuer(e.probe)) return; // bestehende Regel hat Vorrang
+      kandidaten.push({ id: uid(), feld: 'name', muster: e.name, kat: top });
+    });
+    // Längere (spezifischere) Namen zuerst, damit z. B. „Techniker Krankenkasse“ vor „Krankenkasse“ greift
+    kandidaten.sort(function (x, y) { return y.muster.length - x.muster.length; });
+    D.regeln = D.regeln.concat(kandidaten);
+    return kandidaten.length;
   }
   function csvImportieren() {
     var r = csvParse(0);
     if (!r.liste.length) { toast('Keine gültigen Buchungen gefunden'); return; }
     // Duplikate erkennen (gleiche Buchung mehrfach am selben Tag zählt über die Reihenfolge)
-    var vorhanden = {};
-    D.buchungen.forEach(function (b) { var k = b.importKey || importSchluessel(b); vorhanden[k] = (vorhanden[k] || 0) + 1; });
-    var gesehen = {}, neu = 0, dup = 0, kat = 0;
+    var vorhanden = {}, keys = {};
+    D.buchungen.forEach(function (b) { var k = b.importKey || importSchluessel(b); (vorhanden[k] = vorhanden[k] || []).push(b); keys[k] = 1; });
+    var gesehen = {}, neu = 0, dup = 0, kat = 0, aktual = 0, geteilt = 0, zusatz = [];
     r.liste.forEach(function (b) {
-      var k = importSchluessel(b);
+      var k = importSchluessel(b), teile = b.teile; delete b.teile;
       gesehen[k] = (gesehen[k] || 0) + 1;
-      if (gesehen[k] <= (vorhanden[k] || 0)) { dup++; return; }
+      var alt = (vorhanden[k] || [])[gesehen[k] - 1];
+      if (alt) {
+        // Bereits vorhanden: Kategorie, Steuerjahr und Aufteilung aus der Datei ergänzen
+        dup++;
+        var geaendert = false;
+        if (b.kat && (!alt.kat || (csv.ueberschreiben && alt.kat !== b.kat))) { alt.kat = b.kat; geaendert = true; }
+        if (b.steuerjahr && (!alt.steuerjahr || csv.ueberschreiben) && alt.steuerjahr !== b.steuerjahr) { alt.steuerjahr = b.steuerjahr; geaendert = true; }
+        if (teile && !keys[k + '#1']) {
+          if (!alt.importKey) alt.importKey = k;
+          zusatz = zusatz.concat(teileAnlegen(alt, teile)); geteilt++; geaendert = true;
+        }
+        if (geaendert) aktual++;
+        return;
+      }
       b.importKey = k;
-      var rg = regelFuer(b); if (rg) { b.kat = rg.kat; kat++; }
+      if (!b.kat) { var rg = regelFuer(b); if (rg) { b.kat = rg.kat; kat++; } }
+      if (teile) { zusatz = zusatz.concat(teileAnlegen(b, teile)); geteilt++; }
       D.buchungen.push(b); neu++;
     });
+    D.buchungen = D.buchungen.concat(zusatz);
+    var gelernt = csv.map.kat && csv.lernen ? regelnLernen(r.liste) : 0;
     D.csvMapping = Object.assign({}, csv.map);
     $('#dlg').close();
     var jahre = r.liste.map(function (b) { return +b.datum.slice(0, 4); });
     if (jahre.length && jahre.indexOf(ui.jahr) < 0) ui.jahr = Math.max.apply(null, jahre);
     save();
-    toast(neu + ' Buchungen importiert · ' + kat + ' automatisch zugeordnet' + (dup ? ' · ' + dup + ' Duplikate übersprungen' : '') + (r.fehler.length ? ' · ' + r.fehler.length + ' Zeilen unlesbar' : ''));
+    var msg = [neu + ' neu importiert'];
+    if (kat) msg.push(kat + ' per Regel zugeordnet');
+    if (aktual) msg.push(aktual + ' vorhandene aktualisiert');
+    if (dup - aktual > 0) msg.push((dup - aktual) + ' unverändert vorhanden');
+    if (geteilt) msg.push(geteilt + ' aufgeteilt');
+    if (gelernt) msg.push(gelernt + ' Regeln gelernt');
+    if (r.unbekannt.length) msg.push(r.unbekannt.length + ' unbekannte Kategorien');
+    if (r.fehler.length) msg.push(r.fehler.length + ' Hinweise');
+    toast(msg.join(' · '));
   }
 
   // ---------------------------------------------------------------- Ansicht: Steuer
@@ -1217,7 +1318,10 @@
       '<label class="f"><span>Kirchensteuersatz %</span><input type="number" step="1" data-bindpct="settings.kistSatz" value="' + D.settings.kistSatz * 100 + '"></label></div>' +
       '<p class="muted small">Stand der Steuerparameter: Veranlagungszeitraum 2026 (Grundfreibetrag 12.348 €, Soli-Freigrenze 20.350 €, Höchstbetrag Altersvorsorge 30.826 €). Version ' + APP_VERSION + '.</p></div>';
 
-    h += '<div class="card"><h2>Zurücksetzen</h2><p class="muted small">Löscht alle Daten in diesem Browser. Eine verbundene Datei bleibt erhalten.</p><button class="btn danger" data-act="reset">Alle Daten in diesem Browser löschen</button></div>';
+    h += '<div class="card"><h2>Löschen</h2>' +
+      '<p class="muted small"><b>Alle Buchungen löschen</b> entfernt nur die Buchungen (aller Jahre). Regeln, Steuerangaben, KVN-Bescheide, Anlagen und Planung bleiben erhalten – ein erneuter Import ordnet dann über die Regeln wieder zu. Einzelne Monate, Kategorien oder Suchtreffer löschst du unter Buchungen über „Angezeigte löschen“.</p>' +
+      '<div class="btns"><button class="btn danger" data-act="loeschen-alle"' + (D.buchungen.length ? '' : ' disabled') + '>Alle Buchungen löschen (' + D.buchungen.length + ')</button></div>' +
+      '<p class="muted small" style="margin-top:14px"><b>Zurücksetzen</b> löscht alle Daten in diesem Browser. Eine verbundene Datei bleibt erhalten.</p><button class="btn danger" data-act="reset">Alle Daten in diesem Browser löschen</button></div>';
     return h;
   }
 
@@ -1259,6 +1363,24 @@
         var mu = $('#rg-muster').value.trim(); if (!mu) { toast('Bitte ein Muster eingeben'); break; }
         D.regeln.push({ id: uid(), feld: $('#rg-feld').value, muster: mu, kat: $('#rg-kat').value });
         var n3 = regelnAnwenden(true); save(); toast('Regel angelegt' + (n3 ? ' · ' + n3 + ' Buchungen zugeordnet' : '')); break;
+      }
+      case 'loeschen-angezeigt': {
+        var weg = buchungenGefiltert(), wegIds = {};
+        if (!weg.length) break;
+        var fl = ui.filter, besch = [ui.jahr];
+        if (fl.monat) besch.push(MONATE[+fl.monat - 1]);
+        if (fl.kat) besch.push(fl.kat === '_leer' ? 'ohne Kategorie' : fl.kat.indexOf('g:') === 0 ? 'Gruppe ' + (GRUPPEN.filter(function (g) { return 'g:' + g.id === fl.kat; })[0] || {}).name : katName(fl.kat));
+        if (fl.suche) besch.push('Suche „' + fl.suche + '“');
+        if (!confirm(weg.length + ' Buchungen löschen (' + besch.join(', ') + ')?\n\nTipp: vorher unter Daten eine Datensicherung herunterladen.')) break;
+        weg.forEach(function (b) { wegIds[b.id] = 1; });
+        D.buchungen = D.buchungen.filter(function (b) { return !wegIds[b.id]; });
+        save(); toast(weg.length + ' Buchungen gelöscht'); break;
+      }
+      case 'loeschen-alle': {
+        var anz = D.buchungen.length; if (!anz) break;
+        if (!confirm('Wirklich alle ' + anz + ' Buchungen aller Jahre löschen?\n\nRegeln, Steuerangaben, KVN und Planung bleiben erhalten.')) break;
+        if (!confirm('Letzte Rückfrage: ' + anz + ' Buchungen endgültig löschen?')) break;
+        D.buchungen = []; save(); toast(anz + ' Buchungen gelöscht'); break;
       }
       case 'regel-weg': D.regeln.splice(+a.dataset.i, 1); save(); break;
       case 'regel-hoch': { var i = +a.dataset.i, r = D.regeln.splice(i, 1)[0]; D.regeln.splice(i - 1, 0, r); save(); break; }

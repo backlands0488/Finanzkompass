@@ -22,7 +22,9 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 
 ## Erste Schritte
 
-1. **Import:** Kontoumsätze der apoBank als Excel (.xlsx) oder CSV exportieren → Buchungen → Excel/CSV importieren. Spalten einmal zuordnen; die Zuordnung wird gespeichert. Doppelte Buchungen werden beim erneuten Import übersprungen.
+1. **Import:** Kontoumsätze der apoBank als Excel (.xlsx) oder CSV exportieren → Buchungen → Excel/CSV importieren. Spalten einmal zuordnen; die Zuordnung wird gespeichert. Doppelte Buchungen werden beim erneuten Import erkannt.
+   - Optional kann die Datei die Spalten **Kategorie** (Name oder Kürzel, z. B. „KVN-Honorar“ oder `kvn`), **Steuerjahr** und **Aufteilung** (z. B. „Kirchensteuer: 520“ – teilt die Buchung in zwei) enthalten. Bereits importierte Buchungen ohne Kategorie werden dabei ergänzt; auf Wunsch lernt die App daraus Regeln für künftige Importe.
+   - Löschen in größerem Umfang: unter Buchungen „Angezeigte löschen“ (aktuelle Filterauswahl) oder unter Daten „Alle Buchungen löschen“.
 2. **Kategorien:** direkt in der Liste wählen. Die App bietet an, daraus eine Regel zu machen; künftige Importe werden dann automatisch zugeordnet.
 3. **Steuer:** Anstellung Jan–März 2026 (Lohnsteuerbescheinigung) und Jahressummen des Vorauszahlungsbescheids eintragen. Steuerbuchungen, die ein anderes Jahr betreffen (z. B. Nachzahlung 2025), dort umstellen.
 4. **KVN:** Honorarbescheide je Quartal eintragen (brutto, Verwaltungskosten).
