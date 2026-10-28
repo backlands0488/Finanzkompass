@@ -22,7 +22,7 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 
 ## Erste Schritte
 
-1. **CSV-Import:** Kontoumsätze der apoBank exportieren → Buchungen → CSV importieren. Spalten einmal zuordnen; die Zuordnung wird gespeichert. Doppelte Buchungen werden beim erneuten Import übersprungen.
+1. **Import:** Kontoumsätze der apoBank als Excel (.xlsx) oder CSV exportieren → Buchungen → Excel/CSV importieren. Spalten einmal zuordnen; die Zuordnung wird gespeichert. Doppelte Buchungen werden beim erneuten Import übersprungen.
 2. **Kategorien:** direkt in der Liste wählen. Die App bietet an, daraus eine Regel zu machen; künftige Importe werden dann automatisch zugeordnet.
 3. **Steuer:** Anstellung Jan–März 2026 (Lohnsteuerbescheinigung) und Jahressummen des Vorauszahlungsbescheids eintragen. Steuerbuchungen, die ein anderes Jahr betreffen (z. B. Nachzahlung 2025), dort umstellen.
 4. **KVN:** Honorarbescheide je Quartal eintragen (brutto, Verwaltungskosten).

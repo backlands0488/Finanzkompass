@@ -1,7 +1,7 @@
 /* Finanzkompass – Service Worker: App-Dateien offline verfügbar halten.
  * Daten werden hier nicht berührt; sie liegen im Browser-Speicher bzw. in der verbundenen Datei. */
-var CACHE = 'finanzkompass-1.0.0';
-var DATEIEN = ['./', 'index.html', 'styles.css', 'app.js', 'steuer.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
+var CACHE = 'finanzkompass-1.1.0';
+var DATEIEN = ['./', 'index.html', 'styles.css', 'app.js', 'steuer.js', 'xlsx.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(DATEIEN); }).then(function () { return self.skipWaiting(); }));

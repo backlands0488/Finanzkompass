@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.0.0';
+  var APP_VERSION = '1.1.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -511,7 +511,8 @@
       if (r.feld === 'iban' && normIBAN(b.iban) && normIBAN(b.iban) === normIBAN(r.muster)) return r;
       if (r.feld === 'name' && String(b.gegenpartei || '').toLowerCase().indexOf(m) >= 0) return r;
       if (r.feld === 'text' && String(b.text || '').toLowerCase().indexOf(m) >= 0) return r;
-      if (r.feld === 'alle' && (String(b.gegenpartei || '') + ' ' + String(b.text || '')).toLowerCase().indexOf(m) >= 0) return r;
+      if (r.feld === 'art' && String(b.art || '').toLowerCase().indexOf(m) >= 0) return r;
+      if (r.feld === 'alle' && (String(b.gegenpartei || '') + ' ' + String(b.text || '') + ' ' + String(b.art || '')).toLowerCase().indexOf(m) >= 0) return r;
     }
     return null;
   }
@@ -686,7 +687,7 @@
     var h = '<h1>Übersicht ' + Y + '</h1>';
     if (!D.buchungen.length) {
       return h + '<p class="lead">Noch keine Buchungen. Starte mit dem CSV-Import der apoBank-Umsätze oder lege Buchungen von Hand an.</p>' +
-        '<div class="card"><div class="btns"><button class="btn primary" data-act="csv">Kontoumsätze importieren (CSV)</button><button class="btn" data-act="neu">Buchung anlegen</button>' +
+        '<div class="card"><div class="btns"><button class="btn primary" data-act="csv">Kontoumsätze importieren (Excel/CSV)</button><button class="btn" data-act="neu">Buchung anlegen</button>' +
         (hatFS ? '<button class="btn" data-act="datei-neu">Datendatei anlegen</button><button class="btn" data-act="datei-oeffnen">Vorhandene Datendatei öffnen</button>' : '<button class="btn" data-act="import-json">Datensicherung einlesen</button>') +
         '</div></div>';
     }
@@ -750,7 +751,7 @@
         if (f.kat.indexOf('g:') === 0) { if (gruppe(b.kat) !== f.kat.slice(2)) return false; }
         else if (b.kat !== f.kat) return false;
       }
-      if (q && (String(b.gegenpartei) + ' ' + String(b.text) + ' ' + String(b.notiz || '') + ' ' + b.betrag).toLowerCase().indexOf(q) < 0) return false;
+      if (q && (String(b.gegenpartei) + ' ' + String(b.text) + ' ' + String(b.art || '') + ' ' + String(b.notiz || '') + ' ' + b.betrag).toLowerCase().indexOf(q) < 0) return false;
       return true;
     }).sort(function (a, b) { return a.datum < b.datum ? 1 : a.datum > b.datum ? -1 : 0; });
   }
@@ -758,7 +759,7 @@
     var f = ui.filter, liste = buchungenGefiltert();
     var summe = liste.reduce(function (s, b) { return s + b.betrag; }, 0);
     var h = '<h1>Buchungen ' + ui.jahr + '</h1><p class="lead">Kategorie direkt in der Liste ändern; Klick auf eine Buchung öffnet alle Felder.</p>';
-    h += '<div class="btns" style="margin:0 0 14px"><button class="btn primary" data-act="neu">Buchung anlegen</button><button class="btn" data-act="csv">CSV importieren</button><button class="btn" data-act="regeln-anwenden">Regeln auf leere anwenden</button></div>';
+    h += '<div class="btns" style="margin:0 0 14px"><button class="btn primary" data-act="neu">Buchung anlegen</button><button class="btn" data-act="csv">Excel/CSV importieren</button><button class="btn" data-act="regeln-anwenden">Regeln auf leere anwenden</button></div>';
     h += '<div class="filters">' +
       '<select id="f-monat" data-filter="monat"><option value="">Alle Monate</option>' + MONATE.map(function (m, i) { return '<option value="' + (i + 1) + '"' + (+f.monat === i + 1 ? ' selected' : '') + '>' + m + '</option>'; }).join('') + '</select>' +
       '<select id="f-kat" data-filter="kat"><option value="">Alle Kategorien</option><option value="_leer"' + (f.kat === '_leer' ? ' selected' : '') + '>Ohne Kategorie</option>' +
@@ -836,35 +837,54 @@
     });
   }
 
-  // ---------------------------------------------------------------- CSV-Dialog
+  // ---------------------------------------------------------------- Import-Dialog (CSV und Excel)
   var csv = null;
+  function zellText(v) { return v === null || v === undefined ? '' : String(v).trim(); }
+  function csvZeilenNeu() {
+    if (csv.typ === 'csv') csv.rows = csv.zeilen.map(function (z) { return splitCSV(z, csv.trenner); });
+    else csv.rows = (csv.blaetter[csv.blatt] || { zeilen: [] }).zeilen.map(function (z) { return z.map(zellText); });
+    // Kopfzeile: erste Zeile mit maximaler Spaltenzahl, die ein typisches Kopfwort enthält
+    var maxSp = 0; csv.rows.slice(0, 40).forEach(function (z) { maxSp = Math.max(maxSp, z.filter(function (x) { return x !== ''; }).length); });
+    csv.kopf = 0;
+    for (var i = 0; i < Math.min(40, csv.rows.length); i++) {
+      var z = csv.rows[i], n = z.filter(function (x) { return x !== ''; }).length;
+      if (n === maxSp && /datum|buchung|betrag|umsatz|valuta|verwendung/i.test(z.join(' '))) { csv.kopf = i; break; }
+    }
+  }
   function csvDialog() {
     var dlg = $('#dlg'); dlg.className = 'wide';
-    csv = { text: null, zeilen: [], trenner: ';', kopf: 0, map: Object.assign({ datum: '', betrag: '', soll: '', haben: '', name: '', iban: '', text: '', modus: 'betrag' }, D.csvMapping || {}) };
-    dlg.innerHTML = '<div class="dhead"><h2>Kontoumsätze importieren (CSV)</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div>' +
-      '<div class="dbody" id="csvbody"><p>CSV-Export der apoBank (oder einer anderen Bank) auswählen. Die Spalten ordnest du im nächsten Schritt zu; die Zuordnung wird für künftige Importe gespeichert.</p>' +
-      '<input type="file" id="csvfile" accept=".csv,.txt,text/csv"></div><div class="dfoot" id="csvfoot"><button class="btn" data-act="dlg-zu">Abbrechen</button></div>';
+    csv = { typ: 'csv', zeilen: [], rows: [], blaetter: [], blatt: 0, trenner: ';', kopf: 0,
+      map: Object.assign({ datum: '', betrag: '', soll: '', haben: '', name: '', iban: '', text: '', art: '', modus: 'betrag' }, D.csvMapping || {}) };
+    dlg.innerHTML = '<div class="dhead"><h2>Kontoumsätze importieren</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div>' +
+      '<div class="dbody" id="csvbody"><p>Export der apoBank (oder einer anderen Bank) auswählen: Excel (.xlsx) oder CSV. Die Spalten ordnest du im nächsten Schritt zu; die Zuordnung wird für künftige Importe gespeichert.</p>' +
+      '<input type="file" id="csvfile" accept=".csv,.txt,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div><div class="dfoot" id="csvfoot"><button class="btn" data-act="dlg-zu">Abbrechen</button></div>';
     dlg.showModal();
     $('#csvfile').addEventListener('change', function (e) {
       var f = e.target.files[0]; if (!f) return;
       f.arrayBuffer().then(function (buf) {
+        if (XLSX.istXlsx(buf)) {
+          return XLSX.lesen(buf).then(function (bl) {
+            csv.typ = 'xlsx';
+            csv.blaetter = bl;
+            csv.blatt = Math.max(0, bl.findIndex(function (b) { return b.zeilen.length > 1; }));
+            csvZeilenNeu();
+            csvMappingZeigen();
+          });
+        }
+        if (/\.xls$/i.test(f.name)) throw new Error('Das alte Excel-Format .xls wird nicht unterstützt. Bitte als .xlsx oder CSV exportieren.');
         var t = new TextDecoder('utf-8').decode(buf);
         if (t.indexOf('�') >= 0) t = new TextDecoder('windows-1252').decode(buf);
-        csv.text = t.replace(/^﻿/, '');
-        csv.zeilen = zeilenAus(csv.text);
+        csv.typ = 'csv';
+        csv.zeilen = zeilenAus(t.replace(/^﻿/, ''));
         csv.trenner = erkenneTrenner(csv.zeilen);
-        // Kopfzeile: erste Zeile mit maximaler Spaltenzahl, die ein typisches Kopfwort enthält
-        var maxSp = 0; csv.zeilen.slice(0, 40).forEach(function (z) { maxSp = Math.max(maxSp, splitCSV(z, csv.trenner).length); });
-        csv.kopf = 0;
-        for (var i = 0; i < Math.min(40, csv.zeilen.length); i++) {
-          var sp = splitCSV(csv.zeilen[i], csv.trenner);
-          if (sp.length === maxSp && /datum|buchung|betrag|umsatz|valuta|verwendung/i.test(csv.zeilen[i])) { csv.kopf = i; break; }
-        }
+        csvZeilenNeu();
         csvMappingZeigen();
+      }).catch(function (err) {
+        $('#csvbody').insertAdjacentHTML('beforeend', '<div class="note bad">Datei konnte nicht gelesen werden: ' + esc(err.message) + '</div>');
       });
     });
   }
-  function csvSpalten() { return splitCSV(csv.zeilen[csv.kopf] || '', csv.trenner); }
+  function csvSpalten() { return (csv.rows[csv.kopf] || []).map(function (s, i) { return s || ('Spalte ' + (i + 1)); }); }
   function csvMappingZeigen() {
     var sp = csvSpalten(), m = csv.map;
     // Vorschläge, wenn keine gespeicherte Zuordnung passt
@@ -874,11 +894,19 @@
     if (!sp.includes(m.name)) m.name = findeSp(/beg(ü|ue)nstigt|zahlungspflicht|auftraggeber|empf(ä|ae)nger|name|gegen/i);
     if (!sp.includes(m.iban)) m.iban = findeSp(/iban|kontonummer/i);
     if (!sp.includes(m.text)) m.text = findeSp(/verwendung|zweck|buchungstext|beschreibung/i);
+    if (!sp.includes(m.art)) m.art = findeSp(/auftragsart|buchungsart|umsatzart|vorgang/i);
     var opt = function (sel) { return '<option value="">– keine –</option>' + sp.map(function (s) { return '<option' + (s === sel ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join(''); };
-    var h = '<div class="row"><label class="f"><span>Trennzeichen</span><select id="csv-tr"><option value=";"' + (csv.trenner === ';' ? ' selected' : '') + '>Semikolon ;</option><option value=","' + (csv.trenner === ',' ? ' selected' : '') + '>Komma ,</option><option value="\t"' + (csv.trenner === '\t' ? ' selected' : '') + '>Tabulator</option></select></label>' +
-      '<label class="f"><span>Kopfzeile ist Zeile</span><input type="number" id="csv-kopf" min="1" value="' + (csv.kopf + 1) + '"></label></div>';
+    var h = '<div class="row">';
+    if (csv.typ === 'csv') {
+      h += '<label class="f"><span>Trennzeichen</span><select id="csv-tr"><option value=";"' + (csv.trenner === ';' ? ' selected' : '') + '>Semikolon ;</option><option value=","' + (csv.trenner === ',' ? ' selected' : '') + '>Komma ,</option><option value="\t"' + (csv.trenner === '\t' ? ' selected' : '') + '>Tabulator</option></select></label>';
+    } else if (csv.blaetter.length > 1) {
+      h += '<label class="f"><span>Tabellenblatt</span><select id="csv-blatt">' + csv.blaetter.map(function (b, i) { return '<option value="' + i + '"' + (i === csv.blatt ? ' selected' : '') + '>' + esc(b.name) + ' (' + b.zeilen.length + ' Zeilen)</option>'; }).join('') + '</select></label>';
+    } else {
+      h += '<label class="f"><span>Datei</span><input type="text" disabled value="Excel · ' + esc(csv.blaetter[0] ? csv.blaetter[0].name : '') + ' · ' + csv.rows.length + ' Zeilen"></label>';
+    }
+    h += '<label class="f"><span>Kopfzeile ist Zeile</span><input type="number" id="csv-kopf" min="1" value="' + (csv.kopf + 1) + '"></label></div>';
     h += '<details' + (csv.kopf > 0 ? ' open' : '') + '><summary>Dateianfang anzeigen</summary><pre class="small" style="overflow:auto;max-height:160px;background:var(--surface-2);padding:8px;border-radius:8px">' +
-      csv.zeilen.slice(0, 15).map(function (z, i) { return (i + 1) + ': ' + esc(z); }).join('\n') + '</pre></details>';
+      csv.rows.slice(0, 15).map(function (z, i) { return (i + 1) + ': ' + esc(z.join(' | ')); }).join('\n') + '</pre></details>';
     h += '<h3>Spalten zuordnen</h3><div class="row">' +
       '<label class="f"><span>Datum *</span><select data-map="datum">' + opt(m.datum) + '</select></label>' +
       '<label class="f"><span>Betrag</span><div class="seg" style="margin-bottom:4px"><button type="button" data-act="csv-modus" data-v="betrag" aria-pressed="' + (m.modus === 'betrag') + '">Eine Spalte (±)</button><button type="button" data-act="csv-modus" data-v="sollhaben" aria-pressed="' + (m.modus === 'sollhaben') + '">Soll/Haben</button></div>' +
@@ -886,38 +914,40 @@
         '<select data-map="soll">' + opt(m.soll) + '</select><select data-map="haben" style="margin-top:4px">' + opt(m.haben) + '</select>') + '</label></div>' +
       '<div class="row"><label class="f"><span>Gegenpartei (Name)</span><select data-map="name">' + opt(m.name) + '</select></label>' +
       '<label class="f"><span>IBAN</span><select data-map="iban">' + opt(m.iban) + '</select></label>' +
-      '<label class="f"><span>Verwendungszweck</span><select data-map="text">' + opt(m.text) + '</select></label></div>';
+      '<label class="f"><span>Verwendungszweck</span><select data-map="text">' + opt(m.text) + '</select></label>' +
+      '<label class="f"><span>Buchungsart</span><select data-map="art">' + opt(m.art) + '</select></label></div>';
     var vor = csvParse(8);
     h += '<h3>Vorschau</h3>';
     if (vor.fehler.length && !vor.liste.length) h += '<div class="note bad">' + esc(vor.fehler[0]) + '</div>';
     h += '<div class="tablewrap"><table><thead><tr><th>Datum</th><th>Gegenpartei</th><th>Verwendungszweck</th><th class="num">Betrag</th><th>Kategorie (Regel)</th></tr></thead><tbody>' +
-      vor.liste.map(function (b) { var r = regelFuer(b); return '<tr><td>' + datumDE(b.datum) + '</td><td>' + esc(b.gegenpartei) + '</td><td class="small">' + esc(String(b.text).slice(0, 70)) + '</td><td class="num">' + eur(b.betrag, 2) + '</td><td class="small">' + (r ? esc(katName(r.kat)) : '–') + '</td></tr>'; }).join('') +
+      vor.liste.map(function (b) { var r = regelFuer(b); return '<tr><td>' + datumDE(b.datum) + '</td><td>' + esc(b.gegenpartei) + '</td><td class="small">' + esc(String(b.text || b.art || '').slice(0, 70)) + '</td><td class="num">' + eur(b.betrag, 2) + '</td><td class="small">' + (r ? esc(katName(r.kat)) : '–') + '</td></tr>'; }).join('') +
       '</tbody></table></div>';
     $('#csvbody').innerHTML = h;
     $('#csvfoot').innerHTML = '<button class="btn" data-act="dlg-zu">Abbrechen</button><button class="btn primary" data-act="csv-import">Importieren</button>';
-    $('#csv-tr').onchange = function (e) { csv.trenner = e.target.value; csvMappingZeigen(); };
+    if ($('#csv-tr')) $('#csv-tr').onchange = function (e) { csv.trenner = e.target.value; csvZeilenNeu(); csvMappingZeigen(); };
+    if ($('#csv-blatt')) $('#csv-blatt').onchange = function (e) { csv.blatt = +e.target.value; csvZeilenNeu(); csvMappingZeigen(); };
     $('#csv-kopf').onchange = function (e) { csv.kopf = Math.max(0, nz(e.target.value) - 1); csvMappingZeigen(); };
     $$('[data-map]', $('#csvbody')).forEach(function (s) { s.onchange = function () { csv.map[s.dataset.map] = s.value; csvMappingZeigen(); }; });
   }
   function csvParse(limit) {
     var sp = csvSpalten(), m = csv.map, idx = function (n) { return n ? sp.indexOf(n) : -1; };
-    var iD = idx(m.datum), iB = idx(m.betrag), iS = idx(m.soll), iH = idx(m.haben), iN = idx(m.name), iI = idx(m.iban), iT = idx(m.text);
+    var iD = idx(m.datum), iB = idx(m.betrag), iS = idx(m.soll), iH = idx(m.haben), iN = idx(m.name), iI = idx(m.iban), iT = idx(m.text), iA = idx(m.art);
     var liste = [], fehler = [];
     if (iD < 0) fehler.push('Bitte die Datumsspalte zuordnen.');
     if (m.modus === 'betrag' ? iB < 0 : (iS < 0 && iH < 0)) fehler.push('Bitte die Betragsspalte(n) zuordnen.');
     if (fehler.length) return { liste: liste, fehler: fehler };
-    for (var i = csv.kopf + 1; i < csv.zeilen.length; i++) {
-      var z = splitCSV(csv.zeilen[i], csv.trenner);
-      var datum = parseDatum(z[iD]);
+    for (var i = csv.kopf + 1; i < csv.rows.length; i++) {
+      var z = csv.rows[i], wert = function (j) { return j >= 0 ? zellText(z[j]) : ''; };
+      var datum = parseDatum(wert(iD));
       var betrag;
-      if (m.modus === 'betrag') betrag = parseBetrag(z[iB]);
+      if (m.modus === 'betrag') betrag = parseBetrag(wert(iB));
       else {
-        var s = iS >= 0 ? parseBetrag(z[iS]) : 0, hb = iH >= 0 ? parseBetrag(z[iH]) : 0;
+        var s = iS >= 0 ? parseBetrag(wert(iS)) : 0, hb = iH >= 0 ? parseBetrag(wert(iH)) : 0;
         s = isNaN(s) ? 0 : Math.abs(s); hb = isNaN(hb) ? 0 : Math.abs(hb);
         betrag = hb - s;
       }
       if (!datum || isNaN(betrag)) { if (z.join('').trim()) fehler.push('Zeile ' + (i + 1) + ' übersprungen'); continue; }
-      liste.push({ id: uid(), datum: datum, betrag: Math.round(betrag * 100) / 100, gegenpartei: iN >= 0 ? z[iN] : '', iban: iI >= 0 ? normIBAN(z[iI]) : '', text: iT >= 0 ? z[iT] : '', kat: '', steuerjahr: '', notiz: '' });
+      liste.push({ id: uid(), datum: datum, betrag: Math.round(betrag * 100) / 100, gegenpartei: wert(iN), iban: normIBAN(wert(iI)), text: wert(iT), art: wert(iA), kat: '', steuerjahr: '', notiz: '' });
       if (limit && liste.length >= limit) break;
     }
     return { liste: liste, fehler: fehler };
@@ -1165,19 +1195,19 @@
       h += '<p>Auf diesem Gerät speichert die App im Browser. Zum Abgleich: auf dem Notebook die Datendatei hierher übertragen und unten einlesen; Änderungen vom Handy per „Datensicherung herunterladen“ zurückgeben.</p>';
     }
     h += '<p class="muted small">Stand der Daten: ' + new Date(D.meta.geaendert).toLocaleString('de-DE') + ' · ' + D.buchungen.length + ' Buchungen · ' + D.regeln.length + ' Regeln</p>';
-    h += '<div class="btns"><button class="btn" data-act="export-json">Datensicherung herunterladen</button><button class="btn" data-act="import-json">Datensicherung einlesen</button><button class="btn" data-act="csv">Kontoumsätze importieren (CSV)</button></div></div>';
+    h += '<div class="btns"><button class="btn" data-act="export-json">Datensicherung herunterladen</button><button class="btn" data-act="import-json">Datensicherung einlesen</button><button class="btn" data-act="csv">Kontoumsätze importieren (Excel/CSV)</button></div></div>';
 
     // Regeln
     h += '<div class="card"><h2>Regeln für die Kategorisierung</h2><p class="muted small">Die erste passende Regel gilt. IBAN: exakter Vergleich; Name, Verwendungszweck, beides: enthält den Text.</p>';
     if (D.regeln.length) {
       h += '<div class="tablewrap"><table><thead><tr><th>Feld</th><th>Muster</th><th>Kategorie</th><th></th></tr></thead><tbody>' +
         D.regeln.map(function (r, i) {
-          return '<tr><td>' + ({ iban: 'IBAN', name: 'Name', text: 'Verwendungszweck', alle: 'Name oder Zweck' })[r.feld] + '</td><td>' + esc(r.muster) + '</td><td>' + esc(katName(r.kat)) + '</td><td style="white-space:nowrap">' +
+          return '<tr><td>' + ({ iban: 'IBAN', name: 'Name', text: 'Verwendungszweck', art: 'Buchungsart', alle: 'Name, Zweck oder Art' })[r.feld] + '</td><td>' + esc(r.muster) + '</td><td>' + esc(katName(r.kat)) + '</td><td style="white-space:nowrap">' +
             (i ? '<button class="btn small" data-act="regel-hoch" data-i="' + i + '" aria-label="nach oben">↑</button> ' : '') +
             '<button class="btn small danger" data-act="regel-weg" data-i="' + i + '">Entfernen</button></td></tr>';
         }).join('') + '</tbody></table></div>';
     }
-    h += '<div class="row" style="margin-top:10px"><label class="f"><span>Feld</span><select id="rg-feld"><option value="name">Name</option><option value="iban">IBAN</option><option value="text">Verwendungszweck</option><option value="alle">Name oder Zweck</option></select></label>' +
+    h += '<div class="row" style="margin-top:10px"><label class="f"><span>Feld</span><select id="rg-feld"><option value="name">Name</option><option value="iban">IBAN</option><option value="text">Verwendungszweck</option><option value="art">Buchungsart</option><option value="alle">Name, Zweck oder Art</option></select></label>' +
       '<label class="f"><span>Muster</span><input type="text" id="rg-muster"></label><label class="f"><span>Kategorie</span><select id="rg-kat">' + katOptions('', false) + '</select></label></div>' +
       '<div class="btns"><button class="btn" data-act="regel-neu">Regel hinzufügen</button><button class="btn" data-act="regeln-alle">Regeln auf alle Buchungen anwenden</button></div></div>';
 
