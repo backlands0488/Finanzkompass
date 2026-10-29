@@ -619,3 +619,161 @@ ul.anpassen .btn.small { padding: 6px 10px; flex: none; }
 .akzent { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; font-size: 12.5px; color: var(--ink-2); }
 .akzent i { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; }
 .akzent[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+
+/* =====================================================================
+   v1.8 – Formensprache B (angelehnt an „Dein Leben“)
+   Flächen statt Rahmen, starke Rundungen, getönte Hauptkarten,
+   kleine Großbuchstaben-Labels, Pill-Bedienelemente, große Tippflächen.
+   ===================================================================== */
+:root {
+  --bg: #F4F1EC; --surface: #FFFFFF; --surface-2: #ECE8E1; --surface-3: #DDD8CF; --line: #E4DFD7;
+  --ink: #211E22; --ink-2: #4A4541; --ink-3: #605A54;
+  --grid: #E4DFD7;
+  --teil-kosten: #B9B2A6; --teil-steuer: #6A5BC4; --teil-ruecklage: #B4ABEF; --teil-vorsorge: #4C7FB8;
+  --r-karte: 20px; --r-mittel: 14px; --r-klein: 12px;
+  --f-xl: 26px; --f-l: 18px; --f-m: 15px; --f-s: 13px; --f-xs: 11px;
+  --shadow: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121114; --surface: #1C1A1F; --surface-2: #26232A; --surface-3: #322E37; --line: #2C2830;
+    --ink: #EFEBE4; --ink-2: #CFC9C1; --ink-3: #ACA69E; --grid: #25222A;
+    --teil-kosten: #6F6973; --teil-steuer: #9A8FEA; --teil-ruecklage: #4D4588; --teil-vorsorge: #7FA6D6;
+    --warn-soft: #2C251D; --bad-soft: #3A1E1C;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121114; --surface: #1C1A1F; --surface-2: #26232A; --surface-3: #322E37; --line: #2C2830;
+  --ink: #EFEBE4; --ink-2: #CFC9C1; --ink-3: #ACA69E; --grid: #25222A;
+  --teil-kosten: #6F6973; --teil-steuer: #9A8FEA; --teil-ruecklage: #4D4588; --teil-vorsorge: #7FA6D6;
+  --warn-soft: #2C251D; --bad-soft: #3A1E1C;
+}
+:root[data-theme="dim"] {
+  --bg: #2A2C30; --surface: #33363B; --surface-2: #3D4046; --surface-3: #494C52; --line: #41444A;
+  --ink: #E6E3DE; --ink-2: #CFCBC5; --ink-3: #B7B4AE; --grid: #3B3E44;
+  --teil-kosten: #7A776F; --teil-steuer: #A79CF0; --teil-ruecklage: #5B5390; --teil-vorsorge: #86ADE0;
+}
+body { font-size: var(--f-m); }
+h1 { font-size: var(--f-xl); font-weight: 650; letter-spacing: -0.02em; }
+h2 { font-size: var(--f-l); font-weight: 600; }
+.small { font-size: var(--f-s); }
+
+/* Kopfzeile: ruhig, ohne Linie */
+.topbar { border-bottom: 0; background: color-mix(in srgb, var(--bg) 94%, transparent); }
+.jahrwahl select { border: 0; background: var(--surface-2); border-radius: 999px; padding: 8px 14px; font-weight: 600; font-size: var(--f-s); min-height: 40px; }
+.iconbtn { background: var(--surface-2); border-radius: 50%; width: 40px; height: 40px; color: var(--ink); }
+.iconbtn:hover { background: var(--surface-3); }
+.seitenkopf { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 8px 0 14px; }
+.seitenkopf h1 { margin: 0; }
+.seitenkopf span { color: var(--ink-3); font-size: var(--f-s); }
+
+/* Karten: Flächen statt Rahmen */
+.card, .tile, details.mehr.card { border: 0; border-radius: var(--r-karte); background: var(--surface); box-shadow: none; }
+.card { padding: 18px; }
+.tile { border-radius: var(--r-mittel); background: var(--surface-2); }
+.card.hero, .antworten .card.hero { background: var(--accent-soft); }
+.card.hero .tile, .card.hero .stats > div, .card.hero .pills span { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.frage { font-size: var(--f-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.gross { font-size: 40px; font-weight: 700; letter-spacing: -0.03em; }
+.gross small { font-size: 16px; font-weight: 600; }
+.satz.klein { font-size: var(--f-s); color: var(--ink-2); }
+.euro { height: 10px; gap: 3px; margin: 14px 0 10px; background: transparent; }
+.euroleg { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.euroleg span { display: flex; flex-direction: column; gap: 2px; }
+.euroleg small { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); }
+.euroleg i { width: 8px; height: 8px; border-radius: 50%; }
+.euroleg b { font-size: var(--f-m); }
+.euronote { margin: 8px 0 0; }
+
+/* Übersicht: Raster mit halben Kacheln */
+.antworten { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.antworten > * { grid-column: span 2; }
+.antworten > .halb { grid-column: span 1; }
+@media (min-width: 900px) {
+  .antworten { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .antworten > * { grid-column: span 2; }
+  .antworten > .halb { grid-column: span 1; }
+  .antworten > .breit, .antworten > .k-bleibt, .antworten > .k-zuordnen, .antworten > .k-details, .antworten > details.breit { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) { .antworten { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.antworten .card.breit { grid-column: 1 / -1; }
+.tippbar { cursor: pointer; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; transition: transform .12s ease; }
+.tippbar:active { transform: scale(.98); }
+.tippbar .frage { align-self: flex-start; }
+.k-kurs { align-items: stretch; text-align: left; }
+.k-kurs .kursbar { margin: auto 0 4px; width: 100%; }
+.kgross { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.kzeile { font-size: var(--f-s); color: var(--ink-3); }
+.kzeile b { color: var(--ink); }
+.kzeile.klein { font-size: 12px; }
+.kzeile.akzent { color: var(--accent); font-weight: 600; margin-top: auto; }
+.ringbox { width: 104px; height: 104px; }
+.ringbahn { stroke: var(--surface-3); stroke-width: 9; }
+.ringteil { stroke-width: 9; stroke-linecap: round; }
+.ringtext b { font-size: 22px; }
+.kursbar { height: 10px; background: var(--surface-3); border-radius: 5px; }
+.kursbar i { background: var(--accent); }
+.kursbar em { background: var(--ink); }
+.ritualkarte { background: var(--accent-soft); border: 0; }
+.ritualkarte.still { background: var(--surface); }
+
+/* Termine: runde Datumsfelder */
+.tdatum { width: 44px; height: 44px; border-radius: 50%; background: var(--surface-2); }
+.tdatum b { font-size: 15px; }
+.tdatum span { font-size: 10px; letter-spacing: .04em; }
+.termin.steuer .tdatum { background: var(--accent-soft); }
+.termin { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.termin:last-child { border-bottom: 0; }
+
+/* Aufklappgruppen als ruhige Zeilen */
+details.mehr > summary { padding: 16px 18px; }
+details.mehr.innen { border-top: 1px solid var(--line); }
+details.mehr .mehrinhalt { padding: 0 18px 18px; }
+.card.k-details { padding: 18px 18px 6px; }
+.card.k-details details.mehr.innen > summary, .card.k-details details.mehr.innen .mehrinhalt { padding-left: 0; padding-right: 0; }
+
+/* Bedienelemente: Pills und große Tippflächen */
+.btn { border: 0; background: var(--surface-2); border-radius: var(--r-klein); min-height: 44px; padding: 10px 16px; font-weight: 600; }
+.btn:hover { background: var(--surface-3); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); }
+.btn.danger { background: transparent; border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); color: var(--bad); }
+.btn.small { min-height: 36px; padding: 6px 12px; font-size: var(--f-s); }
+.seg { border: 0; background: var(--surface-2); border-radius: 999px; padding: 3px; gap: 2px; }
+.seg button { border: 0 !important; background: transparent; border-radius: 999px; padding: 7px 14px; font-weight: 600; font-size: var(--f-s); color: var(--ink-3); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+input[type=text], input[type=number], input[type=date], select, textarea { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-klein); min-height: 44px; }
+label.fz input { min-height: 40px; }
+.pills span { background: var(--surface-2); }
+.stats > div { background: var(--surface-2); border-radius: var(--r-mittel); }
+.note { border-radius: var(--r-mittel); }
+.note.install { background: var(--accent-soft); }
+.chip { border: 0; background: var(--surface-2); border-radius: var(--r-mittel); }
+.chip:hover { background: var(--accent-soft); }
+.akzent { border: 0; background: var(--surface-2); border-radius: var(--r-mittel); }
+.jahrchips button { border: 0; background: var(--surface-2); border-radius: var(--r-mittel); }
+.jahrchips button[aria-pressed="true"] { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.hb:hover:not([disabled]) { background: var(--surface-2); }
+.hbbar, .qbar { background: var(--surface-2); }
+
+/* Buchungsliste und Dialoge */
+.blist li { border-bottom-color: var(--line); }
+.blist li:hover { background: transparent; }
+.auswahlleiste { border: 0; background: var(--surface); border-radius: var(--r-mittel); }
+dialog { border: 0; border-radius: 22px; background: var(--surface); }
+dialog .dhead, dialog .dfoot { border-color: var(--line); }
+.rkarte { border: 0; background: var(--surface-2); border-radius: 22px; box-shadow: none; }
+
+/* Leiste: Desktop-Seitenleiste und Handy-Leiste */
+nav.tabs { border-right: 0; }
+nav.tabs button { border-radius: var(--r-klein); color: var(--ink-3); font-weight: 600; }
+nav.tabs button:hover { background: var(--surface-2); }
+nav.tabs button[aria-current="page"] { background: var(--surface); color: var(--ink); }
+@media (max-width: 760px) {
+  nav.tabs { display: grid !important; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 6px 6px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(8px); border-top: 1px solid var(--line); }
+  nav.tabs button { padding: 8px 0; font-size: var(--f-xs); }
+  nav.tabs button[aria-current="page"] { background: var(--surface); }
+  .card { padding: 16px; }
+}
+.antworten { align-items: start; }
+.card.hero > .khead h2 { font-size: var(--f-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.card.hero > .khead { margin-bottom: 2px; }

@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.7.0';
+  var APP_VERSION = '1.8.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -691,6 +691,12 @@
       if (el && el !== document.body) { try { el.focus({ preventScroll: true }); } catch (e) { /* ignorieren */ } }
     }
     bindCharts();
+    var dlg = $('#dlg');
+    if (dlg && dlg.open && dlg.dataset.blatt && $('#blatt-body')) {
+      var fb = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.bind : null;
+      $('#blatt-body').innerHTML = karteBlattInhalt(dlg.dataset.blatt);
+      if (fb) { var e2 = $('#blatt-body [data-bind="' + fb + '"]'); if (e2) e2.focus({ preventScroll: true }); }
+    }
   }
   function kopfHoehe() { var t = $('.topbar'); if (t) document.documentElement.style.setProperty('--kopf', t.offsetHeight + 'px'); }
   // Leiste ohne Neuaufbau an die aktuelle Seite anpassen
@@ -868,26 +874,65 @@
   function antwortBleibt(A) {
     var basis = A.P.ein + Math.max(0, A.lohnNetto) + Math.max(0, A.partnerNetto);
     var teile = [
-      { n: 'Praxiskosten', w: A.P.aus + A.P.inv, f: 'var(--teil-kosten)' },
+      { n: 'Kosten', w: A.P.aus + A.P.inv, f: 'var(--teil-kosten)' },
       { n: 'Steuern', w: A.R.gesamt, f: 'var(--teil-steuer)' },
-      { n: 'Vorsorge & Versicherungen', w: A.vorsorgeJahr.gesamt, f: 'var(--teil-vorsorge)' },
-      { n: 'Dir bleibt', w: Math.max(0, A.verfuegbar), f: 'var(--teil-bleibt)' }
+      { n: 'Vorsorge', w: A.vorsorgeJahr.gesamt, f: 'var(--teil-vorsorge)' },
+      { n: 'Dir', w: Math.max(0, A.verfuegbar), f: 'var(--teil-bleibt)' }
     ];
-    var h = '<div class="antwort"><div class="frage">Was bleibt mir' + (A.vergangen ? ' ' + A.Y + ' geblieben' : '') + '?</div>';
-    if (A.verfuegbar < 0) {
-      h += '<div class="gross">' + eur(A.verfuegbar / 12) + ' <small>pro Monat</small></div><p class="satz">Nach Steuern und Vorsorge reicht es ' + (A.vergangen ? 'in diesem Jahr' : 'voraussichtlich') + ' nicht ganz. Schau in die Details unten, woran es liegt.</p>';
-    } else {
-      h += '<div class="gross">' + eur(A.verfuegbar / 12) + ' <small>pro Monat</small></div>' +
-        '<p class="satz">' + (A.vergangen ? 'Nach' : 'Voraussichtlich nach') + ' Steuern, Kranken- und Altersvorsorge' + (st(A.Y).zusammen ? ' (Haushalt)' : '') + '. Im Jahr ' + eur(A.verfuegbar) + '.</p>';
-    }
+    var h = '<div class="antwort"><div class="frage">' + (A.vergangen ? 'Was ist ' + A.Y + ' geblieben?' : 'Was bleibt mir?') + '</div>';
+    h += '<div class="gross">' + eur(A.verfuegbar / 12) + ' <small>/ Monat</small></div>' +
+      '<p class="satz klein">' + (A.verfuegbar < 0 ? 'Nach Steuern und Vorsorge reicht es nicht ganz – die Details zeigen, woran es liegt.' : 'Im Jahr ' + eur(A.verfuegbar) + ' · nach Steuern, Kranken- und Altersvorsorge' + (st(A.Y).zusammen ? ' (Haushalt)' : '')) + '</p>';
     if (basis > 0) {
       h += '<div class="euro" role="img" aria-label="Aufteilung jedes Euros">' + teile.map(function (t) {
         var a = Math.max(0, t.w) / basis; return a > 0.004 ? '<i style="width:' + (a * 100).toFixed(2) + '%;background:' + t.f + '"></i>' : '';
       }).join('') + '</div><div class="euroleg">' + teile.map(function (t) {
-        return '<span><i style="background:' + t.f + '"></i>' + t.n + ' <b>' + Math.round(Math.max(0, t.w) / basis * 100) + ' ct</b></span>';
-      }).join('') + '</div><p class="muted small">… von jedem Euro, der hereinkommt' + (A.lohnNetto > 0 ? ' (Praxis und Anstellung)' : '') + '.</p>';
+        return '<span><small><i style="background:' + t.f + '"></i>' + t.n + '</small><b>' + Math.round(Math.max(0, t.w) / basis * 100) + ' ct</b></span>';
+      }).join('') + '</div><p class="muted small euronote">je Euro, der hereinkommt' + (A.lohnNetto > 0 ? ' (Praxis und Anstellung)' : '') + '</p>';
     }
     return h + '</div>';
+  }
+
+  // Kompakte Kacheln (Entwurf B); Details öffnen sich als Blatt von unten
+  function steuerZahlen(A) {
+    var S = st(A.Y), L = S.lohn;
+    var bezahlt = A.bezahlt.est + A.bezahlt.soli + A.bezahlt.kist + nz(L.lohnsteuer) + nz(L.soli) + nz(L.kist);
+    var offen = A.nochZuZahlen, bedarf = bezahlt + offen;
+    var ruecklage = A.Y === new Date().getFullYear() ? nz(D.ruecklage.betrag) : 0, gedecktR = Math.min(ruecklage, offen);
+    return { bezahlt: bezahlt, offen: offen, bedarf: bedarf, gedecktR: gedecktR, quote: bedarf > 0 ? (bezahlt + gedecktR) / bedarf : 1 };
+  }
+  function kachelSteuer(A) {
+    var z = steuerZahlen(A), luecke = z.offen - z.gedecktR;
+    var h = '<div class="frage">Steuer</div>' +
+      ring([{ wert: z.bedarf > 0 ? z.bezahlt / z.bedarf : 0, farbe: 'var(--teil-steuer)' }, { wert: z.bedarf > 0 ? z.gedecktR / z.bedarf : 0, farbe: 'var(--accent)' }],
+        Math.round(Math.min(1, z.quote) * 100) + ' %', 'gedeckt');
+    if (A.vergangen) h += '<div class="kzeile">' + eur(A.R.gesamt) + ' im Jahr</div>';
+    else if (z.quote >= 0.995) { h += '<div class="kzeile"><span class="haken">✓</span> gut vorgesorgt</div>'; if (z.bedarf > 0 && A.Y === new Date().getFullYear()) meilenstein('steuer-gedeckt-' + A.Y, 'Steuer ' + A.Y + ' ist voll gedeckt – gut vorgesorgt.'); }
+    else h += '<div class="kzeile">noch <b>' + eur(luecke / A.monateRest) + '</b> / Monat</div>';
+    return '<div class="card k-steuer halb tippbar" data-act="karte-blatt" data-k="steuer" role="button" tabindex="0" aria-label="Steuerrücklage im Detail">' + h + '</div>';
+  }
+  function kachelKurs(A) {
+    var z = zielFuer(A.Y), h = '<div class="frage">Kurs</div>';
+    if (!z) {
+      h += '<div class="kgross">' + eur(A.P.gewinn) + '</div><div class="kzeile">Gewinn hochgerechnet</div><div class="kzeile akzent">Ziel festlegen ›</div>';
+    } else {
+      var diff = (A.vergangen ? A.I.gewinn : A.P.gewinn) - z.wert, ist = A.I.gewinn;
+      var anteil = Math.max(0, Math.min(1, ist / z.wert)), soll = A.vergangen ? 1 : Math.max(0, Math.min(1, A.t));
+      h += '<div class="kgross">' + (diff >= 0 ? '+' : '−') + eur(Math.abs(diff)) + '</div><div class="kzeile">' + (diff >= 0 ? 'über' : 'unter') + ' ' + (z.quelle === 'ziel' ? 'Ziel' : 'Vorjahr') + '</div>' +
+        '<div class="kursbar"><i style="width:' + (anteil * 100).toFixed(1) + '%"></i>' + (!A.vergangen && A.t < 1 ? '<em style="left:' + (soll * 100).toFixed(1) + '%"></em>' : '') + '</div>' +
+        '<div class="kzeile klein">' + (z.quelle === 'ziel' ? 'Ziel ' : 'Vorjahr ') + eur(z.wert) + '</div>';
+      if (z.quelle === 'ziel' && ist >= z.wert) meilenstein('ziel-' + A.Y, 'Gewinnziel ' + A.Y + ' erreicht. Schön!');
+    }
+    return '<div class="card k-kurs halb tippbar" data-act="karte-blatt" data-k="kurs" role="button" tabindex="0" aria-label="Kurs im Detail">' + h + '</div>';
+  }
+  function karteBlattInhalt(k) {
+    var A = auswertung(ui.jahr);
+    return k === 'steuer' ? antwortSteuer(A) : antwortKurs(A);
+  }
+  function karteBlatt(k) {
+    var dlg = $('#dlg'); dlg.className = 'blatt'; dlg.onclose = function () { delete dlg.dataset.blatt; };
+    dlg.dataset.blatt = k;
+    dlg.innerHTML = '<div class="blattgriff"></div><div class="dhead"><h2>' + (k === 'steuer' ? 'Steuerrücklage' : 'Kurs') + ' ' + ui.jahr + '</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div><div class="dbody" id="blatt-body">' + karteBlattInhalt(k) + '</div>';
+    if (!dlg.open) dlg.showModal();
   }
 
   function antwortSteuer(A) {
@@ -1101,7 +1146,7 @@
     var tage = function (iso) { var n = Math.round((new Date(iso + 'T12:00:00') - new Date(jetzt + 'T12:00:00')) / 864e5); return n <= 0 ? 'heute' : n === 1 ? 'morgen' : 'in ' + n + ' Tagen'; };
     var h = '<div class="frage">Demnächst</div><div class="termine">' + items.slice(0, 6).map(function (i) {
       var p = i.d.split('-');
-      return '<div class="termin ' + i.cls + '"><div class="tdatum"><b>' + +p[2] + '.</b><span>' + MONATE[+p[1] - 1] + '</span></div><div class="ttext"><b>' + esc(i.t) + '</b><small>' + tage(i.d) + ' · ' + esc(i.s) + '</small></div>' +
+      return '<div class="termin ' + i.cls + '"><div class="tdatum"><b>' + +p[2] + '</b><span>' + MONATE[+p[1] - 1].toUpperCase() + '</span></div><div class="ttext"><b>' + esc(i.t) + '</b><small>' + tage(i.d) + ' · ' + esc(i.s) + '</small></div>' +
         (i.b !== null ? '<em class="' + (i.b > 0 ? 'pos' : '') + '">' + (i.b > 0 ? '+' : '') + eur(i.b) + '</em>' : '') + '</div>';
     }).join('') + '</div>';
     return karte('termine', h);
@@ -1198,8 +1243,8 @@
 
   var KARTEN = [
     { id: 'bleibt', n: 'Was bleibt mir?', f: function (A) { return karte('bleibt', antwortBleibt(A), true, 'hero'); } },
-    { id: 'steuer', n: 'Reicht meine Steuerrücklage?', f: function (A) { return karte('steuer', antwortSteuer(A)); } },
-    { id: 'kurs', n: 'Bin ich auf Kurs?', f: function (A) { return karte('kurs', antwortKurs(A)); } },
+    { id: 'steuer', n: 'Steuerrücklage', f: kachelSteuer },
+    { id: 'kurs', n: 'Kurs', f: kachelKurs },
     { id: 'termine', n: 'Demnächst (Termine)', f: karteTermine },
     { id: 'zuordnen', n: 'Zuordnen', f: karteZuordnen },
     { id: 'monat', n: 'Monatsrückblick', f: karteMonat },
@@ -1220,15 +1265,15 @@
 
   function viewUebersicht() {
     var A = auswertung(ui.jahr), Y = ui.jahr;
-    var h = installHinweis() + '<h1>Übersicht ' + Y + '</h1>';
+    var h = installHinweis();
     if (!D.buchungen.length) {
-      return h + '<p class="lead">Noch keine Buchungen. Starte mit dem Import der apoBank-Umsätze (Excel oder CSV).</p>' +
+      return h + '<h1>Übersicht</h1><p class="lead">Noch keine Buchungen. Starte mit dem Import der apoBank-Umsätze (Excel oder CSV).</p>' +
         '<div class="card"><div class="btns"><button class="btn primary" data-act="csv">Kontoumsätze importieren</button><button class="btn" data-act="neu">Buchung anlegen</button>' +
         (hatFS ? '<button class="btn" data-act="datei-oeffnen">Vorhandene Datendatei öffnen</button>' : '<button class="btn" data-act="import-json">Datensicherung einlesen</button>') +
         '</div></div>';
     }
-    var stand = A.vergangen ? 'Abgeschlossenes Jahr' : A.zukunft ? 'Planjahr' : 'Stand ' + datumDE(A.stichtag) + ' · Rest des Jahres hochgerechnet';
-    h += '<p class="lead">' + stand + '</p>';
+    var stand = A.vergangen ? 'abgeschlossen' : A.zukunft ? 'Planjahr' : 'Stand ' + datumDE(A.stichtag).slice(0, 6);
+    h += '<div class="seitenkopf"><h1>Übersicht</h1><span>' + stand + '</span></div>';
     if (fileHandle && dateiStatus === 'erlaubnis') h += '<div class="note warn"><b>Dateizugriff erneut erlauben.</b> <a href="#" data-act="datei-erlauben">Erlauben</a></div>';
     if (A.R.avUeberHB > 0) h += '<div class="note bad"><b>Altersvorsorge über dem Höchstbetrag:</b> ' + eur(A.R.avUeberHB) + ' wirken steuerlich nicht.</div>';
     var s = kartenOrdnung(), inhalt = '';
@@ -1937,6 +1982,9 @@
     save(); ritualZeigen('links');
   }
   document.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('tippbar')) { e.preventDefault(); e.target.click(); }
+  });
+  document.addEventListener('keydown', function (e) {
     if (!ritual || !$('#dlg').open || /input|select|textarea/i.test((e.target || {}).tagName)) return;
     var chips = $$('#dlg .chip');
     if (/^[1-4]$/.test(e.key) && chips[+e.key - 1]) { e.preventDefault(); ritualZuordnen(chips[+e.key - 1].dataset.k); }
@@ -1966,12 +2014,12 @@
   var SCHEMATA = [['auto', 'Automatisch'], ['hell', 'Hell'], ['gedimmt', 'Gedimmt'], ['dunkel', 'Dunkel']];
   // Ruhige Akzentfarben je Schema: [Akzent, Schrift auf Akzent, Fläche]
   var AKZENTE = {
-    petrol: ['Petrol', { hell: ['#1f6b66', '#ffffff', '#e2efed'], gedimmt: ['#6cc0b8', '#10302d', '#3a504e'], dunkel: ['#4fb3aa', '#0d1f1d', '#1d3330'] }],
-    salbei: ['Salbei', { hell: ['#4f7a5f', '#ffffff', '#e0ebe3'], gedimmt: ['#9bc0ac', '#1c3127', '#405249'], dunkel: ['#8fb3a0', '#14251d', '#1f2c26'] }],
-    taube: ['Taubenblau', { hell: ['#3f6385', '#ffffff', '#dee7f1'], gedimmt: ['#a2bfd9', '#14263a', '#3f4b58'], dunkel: ['#8eb0cf', '#0f2133', '#1d2a37'] }],
-    ocker: ['Ocker', { hell: ['#86672a', '#ffffff', '#f1e7d2'], gedimmt: ['#dcbb7a', '#33260a', '#564a3a'], dunkel: ['#d4b06a', '#2e2208', '#33291a'] }],
-    pflaume: ['Pflaume', { hell: ['#6e4a6b', '#ffffff', '#ede1ec'], gedimmt: ['#cfadcc', '#33192f', '#55444f'], dunkel: ['#c5a1c2', '#2c1428', '#30232e'] }],
-    graphit: ['Graphit', { hell: ['#3c4245', '#ffffff', '#e1e4e4'], gedimmt: ['#d3d9d8', '#22282a', '#4b5153'], dunkel: ['#c9d0cf', '#1a1f20', '#2a3031'] }]
+    petrol: ['Petrol', { hell: ['#1f6b66', '#ffffff', '#dcebe8'], gedimmt: ['#6cc0b8', '#10302d', '#3a504e'], dunkel: ['#6cc0b8', '#0d1f1d', '#16302d'] }],
+    salbei: ['Salbei', { hell: ['#4f7a5f', '#ffffff', '#e0ebe3'], gedimmt: ['#9bc0ac', '#1c3127', '#405249'], dunkel: ['#8fb3a0', '#14251d', '#1c2a23'] }],
+    taube: ['Taubenblau', { hell: ['#3f6385', '#ffffff', '#dee7f1'], gedimmt: ['#a2bfd9', '#14263a', '#3f4b58'], dunkel: ['#8eb0cf', '#0f2133', '#1b2733'] }],
+    ocker: ['Ocker', { hell: ['#86672a', '#ffffff', '#f1e7d2'], gedimmt: ['#dcbb7a', '#33260a', '#564a3a'], dunkel: ['#d4b06a', '#2e2208', '#30271a'] }],
+    pflaume: ['Pflaume', { hell: ['#6e4a6b', '#ffffff', '#ede1ec'], gedimmt: ['#cfadcc', '#33192f', '#55444f'], dunkel: ['#c5a1c2', '#2c1428', '#2d212b'] }],
+    graphit: ['Graphit', { hell: ['#3c4245', '#ffffff', '#e1e4e4'], gedimmt: ['#d3d9d8', '#22282a', '#4b5153'], dunkel: ['#c9d0cf', '#1a1f20', '#272c2d'] }]
   };
   var dunkelMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
   function wirksamesSchema() {
@@ -2051,6 +2099,7 @@
       }
       case 'schema': D.settings.schema = a.dataset.v; darstellungAnwenden(); save(); break;
       case 'akzent': D.settings.akzent = a.dataset.v; darstellungAnwenden(); save(); break;
+      case 'karte-blatt': karteBlatt(a.dataset.k); break;
       case 'mehr-blatt': mehrBlatt(); break;
       case 'anpassen': anpassenDialog(a.dataset.was); break;
       case 'anp-hoch': anpassenAendern(a.dataset.was, a.dataset.id, 'hoch'); break;
