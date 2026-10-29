@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.9.0';
+  var APP_VERSION = '1.10.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -704,6 +704,8 @@
       if (el && el !== document.body) { try { el.focus({ preventScroll: true }); } catch (e) { /* ignorieren */ } }
     }
     bindCharts();
+    var ps = $('#persist-status');
+    if (ps && navigator.storage && navigator.storage.persisted) navigator.storage.persisted().then(function (p) { ps.textContent = p ? 'Speicher dauerhaft ✓' : 'Speicher nicht dauerhaft bestätigt · Sicherungen sind wichtig'; });
     var dlg = $('#dlg');
     if (dlg && dlg.open && dlg.dataset.blatt && $('#blatt-body')) {
       var fb = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.bind : null;
@@ -1861,9 +1863,15 @@
         dat += '<p>Optional: Die App schreibt jede Änderung in eine JSON-Datei, z. B. in einem Sync-Ordner.</p><div class="btns"><button class="btn primary" data-act="datei-neu">Datendatei anlegen</button><button class="btn" data-act="datei-oeffnen">Vorhandene öffnen</button></div>';
       }
     }
-    dat += '<div class="btns"><button class="btn" data-act="export-json">Sicherung herunterladen</button><button class="btn" data-act="import-json">Sicherung einlesen</button><button class="btn" data-act="csv">Kontoumsätze importieren</button></div>' +
+    var sich = '<div class="frage">Letzte Sicherung</div><div class="sicherung-wann">' + sicherungAlter() + (D.meta.letzteSicherung ? ' <small>' + new Date(D.meta.letzteSicherung).toLocaleDateString('de-DE') + '</small>' : '') + '</div>' +
+      '<div class="btns"><button class="btn primary" data-act="export-json">Jetzt sichern</button>' + (kannTeilen() ? '<button class="btn" data-act="sicherung-teilen">Teilen</button>' : '') + '<button class="btn" data-act="import-json">Wiederherstellen</button></div>' +
+      '<div class="frage" style="margin-top:14px">Automatisch alle … Tage</div><div class="seg breit">' + SICHERUNG_TAGE.map(function (t) { return '<button data-act="sicherung-tage" data-v="' + t + '" aria-pressed="' + (t === sicherungTage()) + '">' + t + '</button>'; }).join('') + '</div>' +
+      '<p class="muted small">' + (fileHandle && dateiStatus === 'verbunden' ? 'Solange die Datendatei verbunden ist, ist sie deine laufende Sicherung; automatische Downloads ruhen.' : 'Ist eine Sicherung fällig, lädt die App sie beim nächsten Tippen in deine Downloads.') + '</p>' +
+      '<p class="muted small" id="persist-status"></p>';
+    dat = sich + (dat ? '<div class="frage" style="margin-top:16px">Datendatei</div>' + dat : '') +
+      '<div class="btns"><button class="btn" data-act="csv">Kontoumsätze importieren</button></div>' +
       '<p class="muted small">Stand ' + new Date(D.meta.geaendert).toLocaleString('de-DE') + ' · ' + D.buchungen.length + ' Buchungen · Alle Daten bleiben auf diesem Gerät.</p>';
-    h += gruppeKarte('e-daten', 'Daten und Sicherung ' + info('Abgleich Handy ↔ Notebook: Sicherung auf dem einen Gerät herunterladen und auf dem anderen einlesen. Einlesen ersetzt den Stand vollständig.'), fileHandle ? 'Datei ' + esc(fileHandle.name) : 'im Browser gespeichert', dat);
+    h += gruppeKarte('e-daten', 'Sicherung und Daten ' + info('Abgleich Handy ↔ Notebook: Sicherung auf dem einen Gerät teilen oder herunterladen und auf dem anderen über „Wiederherstellen“ einlesen. Einlesen ersetzt den Stand vollständig.'), 'zuletzt gesichert ' + sicherungAlter() + (sicherungFaellig() ? ' · fällig' : ''), dat, true);
 
     h += gruppeKarte('e-app', 'Als App nutzen', istApp() ? 'installiert ✓' : 'im Browser', installKarte().replace(/^<div class="card"><h2>Als App nutzen<\/h2>/, '').replace(/<\/div>$/, ''));
 
@@ -2066,6 +2074,39 @@
         return '<button class="akzent" data-act="akzent" data-v="' + k + '" aria-pressed="' + (k === ak) + '" aria-label="Akzentfarbe ' + AKZENTE[k][0] + '"><i style="background:' + f[0] + '">' + (k === ak ? '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="' + f[1] + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') + '</i><span>' + AKZENTE[k][0] + '</span></button>';
       }).join('') + '</div>';
   }
+
+  // ---------------------------------------------------------------- Sicherung (wie in „Dein Leben“)
+  var SICHERUNG_TAGE = [1, 3, 7, 14, 30];
+  function sicherungTage() { var v = nz(D.settings.sicherungTage) || 7; return SICHERUNG_TAGE.indexOf(v) >= 0 ? v : 7; }
+  function sicherungName() { return 'finanzkompass-sicherung-' + isoHeute() + '.json'; }
+  function sicherungText() { D.meta.letzteSicherung = new Date().toISOString(); save(true); return JSON.stringify(D, null, 1); }
+  function tageSeit(iso) { if (!iso) return null; return Math.floor((new Date(isoHeute() + 'T12:00:00') - new Date(iso.slice(0, 10) + 'T12:00:00')) / 864e5); }
+  function sicherungAlter() { var t = tageSeit(D.meta.letzteSicherung); return t === null ? 'noch nie' : t === 0 ? 'heute' : t === 1 ? 'gestern' : 'vor ' + t + ' Tagen'; }
+  function sicherungHerunterladen() {
+    var blob = new Blob([sicherungText()], { type: 'application/json' });
+    var url = URL.createObjectURL(blob), l = document.createElement('a');
+    l.href = url; l.download = sicherungName(); document.body.appendChild(l); l.click(); l.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+  function kannTeilen() {
+    try { return !!(navigator.canShare && navigator.canShare({ files: [new File(['{}'], 'x.json', { type: 'application/json' })] })); } catch (e) { return false; }
+  }
+  function sicherungTeilen() {
+    var datei = new File([sicherungText()], sicherungName(), { type: 'application/json' });
+    navigator.share({ files: [datei], title: 'Finanzkompass-Sicherung' }).then(function () { toast('Sicherung geteilt'); render(); })
+      .catch(function (e) { if (e && e.name !== 'AbortError') toast('Teilen nicht möglich: ' + e.message); });
+  }
+  // Fällig? Nur ohne verbundene Datendatei (die ist selbst eine laufende Sicherung) und wenn es Daten gibt
+  function sicherungFaellig() {
+    if (!D.buchungen.length || (fileHandle && dateiStatus === 'verbunden')) return false;
+    var t = tageSeit(D.meta.letzteSicherung);
+    return t === null || t >= sicherungTage();
+  }
+  // Beim ersten Tippen, wenn fällig: Download braucht eine Nutzeraktion
+  document.addEventListener('click', function (e) {
+    if (!sicherungFaellig() || e.target.closest('[data-act=export-json],[data-act=sicherung-teilen],[data-act=import-json],#csvfile')) return;
+    sicherungHerunterladen(); toast('Automatische Sicherung gespeichert (Downloads)');
+  }, true);
   // ---------------------------------------------------------------- Toast
   var toastTimer = null;
   function toast(text, knopf, fn) {
@@ -2203,12 +2244,9 @@
       case 'datei-erlauben': dateiErneutErlauben(); break;
       case 'datei-trennen': dateiTrennen(); break;
       case 'datei-jetzt': dateiSchreiben().then(function () { toast('Gespeichert'); }); break;
-      case 'export-json': {
-        var blob = new Blob([JSON.stringify(D, null, 1)], { type: 'application/json' });
-        var url = URL.createObjectURL(blob), l = document.createElement('a');
-        l.href = url; l.download = 'finanzkompass-daten-' + isoHeute() + '.json'; document.body.appendChild(l); l.click(); l.remove();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 2000); break;
-      }
+      case 'export-json': sicherungHerunterladen(); render(); break;
+      case 'sicherung-teilen': sicherungTeilen(); break;
+      case 'sicherung-tage': D.settings.sicherungTage = +a.dataset.v; save(); break;
       case 'import-json': {
         var inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json';
         inp.onchange = function () {

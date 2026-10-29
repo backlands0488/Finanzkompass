@@ -39,6 +39,13 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 - **Übersicht:** Karten – Was bleibt mir?, Steuerrücklage, Kurs, Demnächst (Steuertermine nach § 37 EStG und erwartete Zahlungen), Zuordnen, Monatsrückblick, Woher/Wohin, Fixkosten (automatisch erkannte wiederkehrende Zahlungen), Was wäre, wenn …, Details. Über „Übersicht anpassen“ verschieben und ausblenden.
 - **Steuer, KVN, Planung:** Ergebnis oben, Eingaben in aufklappbaren Gruppen mit Zusammenfassung; Erklärungen hinter „i“. Szenarien werden Jahr für Jahr bearbeitet.
 
+## Darstellung, Bedienung, Sicherung
+
+- **Darstellung** (⚙ → Darstellung): Farbschema Automatisch, Hell, Gedimmt oder Dunkel; sechs ruhige Akzentfarben. Formensprache wie „Dein Leben“.
+- **Wischen** zwischen den Bereichen der Leiste (Handy). Die oberste sichtbare Seite ist die Startseite.
+- **Zurück-Taste** schließt zuerst Blätter und Fenster, dann Unterseiten (Einstellungen), erst danach die App.
+- **Sicherung** (⚙ → Sicherung und Daten): automatisch alle 1/3/7/14/30 Tage als Download (beim nächsten Tippen, wenn fällig), „Teilen“ über das Android-Teilen-Menü, Wiederherstellen aus einer Sicherungsdatei.
+
 ## Rechenstand
 
 Tarif § 32a EStG 2026, Soli-Freigrenze 20.350 €, Höchstbetrag Altersvorsorge 30.826 €, sonstige Vorsorge 2.800 €/1.900 €, Arbeitnehmer-Pauschbetrag 1.230 €, Sonderausgaben-Pauschbetrag 36 €. Folgejahre: Tarif mit der eingestellten Inflationsrate fortgeschrieben. Orientierungsrechnung, keine Steuerberatung.

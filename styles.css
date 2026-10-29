@@ -784,3 +784,7 @@ nav.tabs button[aria-current="page"] { background: var(--surface); color: var(--
 .khead .infoknopf { width: 28px; height: 28px; font-size: 14px; }
 .infoblatt p { margin: 0 0 8px; font-size: var(--f-m); line-height: 1.55; color: var(--ink-2); }
 .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); margin-left: 6px; vertical-align: 1px; }
+
+/* v1.10: Sicherung */
+.sicherung-wann { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 2px 0 10px; }
+.sicherung-wann small { font-size: var(--f-s); font-weight: 500; color: var(--ink-3); margin-left: 4px; }
