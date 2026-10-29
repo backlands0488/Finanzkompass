@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.6.0';
+  var APP_VERSION = '1.7.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -666,7 +666,7 @@
     var ae = document.activeElement;
     var fokus = ae && ae.dataset ? (ae.dataset.bind || ae.id || null) : null;
     var m = $('#main');
-    navRendern(); jahreRendern(); statusAnzeigen();
+    darstellungAnwenden(); navRendern(); jahreRendern(); statusAnzeigen();
     if (seitenModus()) {
       seitenScrollMerken();
       var ids = sichtbareBereiche();
@@ -1781,6 +1781,7 @@
   // ---------------------------------------------------------------- Ansicht: Einstellungen
   function viewDaten() {
     var h = '<h1>Einstellungen</h1>';
+    h += gruppeKarte('e-darstellung', 'Darstellung', SCHEMATA.filter(function (x) { return x[0] === (D.settings.schema || 'auto'); })[0][1] + ' · ' + (AKZENTE[D.settings.akzent] || AKZENTE.petrol)[0], darstellungKarte());
     h += gruppeKarte('e-leiste', 'Leiste anpassen', sichtbareBereiche().map(function (id) { return BEREICH_NAME[id]; }).join(' · '), anpassenListe('nav'));
     var ks = kartenOrdnung();
     h += gruppeKarte('e-karten', 'Übersicht anpassen', (ks.order.length - ks.aus.length) + ' von ' + ks.order.length + ' Karten sichtbar', anpassenListe('karten'));
@@ -1960,6 +1961,44 @@
       '<li>Danach immer über das <b>App-Symbol</b> starten.</li><li>Meldet Chrome „bereits installiert“, die App aber startet nicht: in den Android-Einstellungen unter Apps „Finanzkompass“ deinstallieren und neu installieren. Vorher hier eine Datensicherung herunterladen.</li></ol></div>';
   }
 
+
+  // ---------------------------------------------------------------- Darstellung: Farbschema und Akzent
+  var SCHEMATA = [['auto', 'Automatisch'], ['hell', 'Hell'], ['gedimmt', 'Gedimmt'], ['dunkel', 'Dunkel']];
+  // Ruhige Akzentfarben je Schema: [Akzent, Schrift auf Akzent, Fläche]
+  var AKZENTE = {
+    petrol: ['Petrol', { hell: ['#1f6b66', '#ffffff', '#e2efed'], gedimmt: ['#6cc0b8', '#10302d', '#3a504e'], dunkel: ['#4fb3aa', '#0d1f1d', '#1d3330'] }],
+    salbei: ['Salbei', { hell: ['#4f7a5f', '#ffffff', '#e0ebe3'], gedimmt: ['#9bc0ac', '#1c3127', '#405249'], dunkel: ['#8fb3a0', '#14251d', '#1f2c26'] }],
+    taube: ['Taubenblau', { hell: ['#3f6385', '#ffffff', '#dee7f1'], gedimmt: ['#a2bfd9', '#14263a', '#3f4b58'], dunkel: ['#8eb0cf', '#0f2133', '#1d2a37'] }],
+    ocker: ['Ocker', { hell: ['#86672a', '#ffffff', '#f1e7d2'], gedimmt: ['#dcbb7a', '#33260a', '#564a3a'], dunkel: ['#d4b06a', '#2e2208', '#33291a'] }],
+    pflaume: ['Pflaume', { hell: ['#6e4a6b', '#ffffff', '#ede1ec'], gedimmt: ['#cfadcc', '#33192f', '#55444f'], dunkel: ['#c5a1c2', '#2c1428', '#30232e'] }],
+    graphit: ['Graphit', { hell: ['#3c4245', '#ffffff', '#e1e4e4'], gedimmt: ['#d3d9d8', '#22282a', '#4b5153'], dunkel: ['#c9d0cf', '#1a1f20', '#2a3031'] }]
+  };
+  var dunkelMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  function wirksamesSchema() {
+    var sc = D.settings.schema || 'auto';
+    if (sc === 'auto') return dunkelMQ && dunkelMQ.matches ? 'dunkel' : 'hell';
+    return sc;
+  }
+  function darstellungAnwenden() {
+    var root = document.documentElement, sc = D.settings.schema || 'auto';
+    if (sc === 'auto') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', { hell: 'light', gedimmt: 'dim', dunkel: 'dark' }[sc]);
+    var ak = AKZENTE[D.settings.akzent] || AKZENTE.petrol, w = ak[1][wirksamesSchema()];
+    root.style.setProperty('--accent', w[0]); root.style.setProperty('--accent-ink', w[1]); root.style.setProperty('--accent-soft', w[2]);
+    root.style.setProperty('--teil-bleibt', w[0]);
+    var bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+    $$('meta[name=theme-color]').forEach(function (m) { m.setAttribute('content', bg); m.removeAttribute('media'); });
+  }
+  if (dunkelMQ && dunkelMQ.addEventListener) dunkelMQ.addEventListener('change', function () { darstellungAnwenden(); });
+  function darstellungKarte() {
+    var sc = D.settings.schema || 'auto', ak = AKZENTE[D.settings.akzent] ? D.settings.akzent : 'petrol', wsc = wirksamesSchema();
+    return '<div class="seg breit">' + SCHEMATA.map(function (x) { return '<button data-act="schema" data-v="' + x[0] + '" aria-pressed="' + (sc === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+      '<p class="muted small" style="margin:6px 0 12px">„Automatisch“ folgt dem Hell- oder Dunkelmodus deines Geräts.</p>' +
+      '<div class="akzente">' + Object.keys(AKZENTE).map(function (k) {
+        var f = AKZENTE[k][1][wsc];
+        return '<button class="akzent" data-act="akzent" data-v="' + k + '" aria-pressed="' + (k === ak) + '" aria-label="Akzentfarbe ' + AKZENTE[k][0] + '"><i style="background:' + f[0] + '">' + (k === ak ? '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="' + f[1] + '" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' : '') + '</i><span>' + AKZENTE[k][0] + '</span></button>';
+      }).join('') + '</div>';
+  }
   // ---------------------------------------------------------------- Toast
   var toastTimer = null;
   function toast(text, knopf, fn) {
@@ -2010,6 +2049,8 @@
         D.buchungen = D.buchungen.filter(function (b) { return !wegIds[b.id]; });
         save(); toast(weg.length + ' Buchungen gelöscht'); break;
       }
+      case 'schema': D.settings.schema = a.dataset.v; darstellungAnwenden(); save(); break;
+      case 'akzent': D.settings.akzent = a.dataset.v; darstellungAnwenden(); save(); break;
       case 'mehr-blatt': mehrBlatt(); break;
       case 'anpassen': anpassenDialog(a.dataset.was); break;
       case 'anp-hoch': anpassenAendern(a.dataset.was, a.dataset.id, 'hoch'); break;
@@ -2181,6 +2222,7 @@
   });
 
   // ---------------------------------------------------------------- Start
+  darstellungAnwenden();
   render();
   if (/[?&]aktion=zuordnen/.test(location.search)) { history.replaceState(null, '', location.pathname + location.hash); setTimeout(ritualStart, 300); }
   if (hatFS) {
