@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.8.0';
+  var APP_VERSION = '1.9.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -563,9 +563,8 @@
     if (!s || !s.order) s = D.settings.nav = { order: BEREICHE.slice(), aus: [] };
     BEREICHE.forEach(function (id) { if (s.order.indexOf(id) < 0) s.order.push(id); });
     s.order = s.order.filter(function (id) { return BEREICHE.indexOf(id) >= 0; });
-    // Übersicht bleibt immer sichtbar und vorn
-    s.order = ['uebersicht'].concat(s.order.filter(function (id) { return id !== 'uebersicht'; }));
-    s.aus = (s.aus || []).filter(function (id) { return id !== 'uebersicht'; });
+    s.aus = (s.aus || []).filter(function (id) { return BEREICHE.indexOf(id) >= 0; });
+    if (s.aus.length >= s.order.length) s.aus = [];   // mindestens ein Bereich bleibt sichtbar
     return s;
   }
   function sichtbareBereiche() { var s = navOrdnung(); return s.order.filter(function (id) { return s.aus.indexOf(id) < 0; }); }
@@ -599,18 +598,18 @@
   function anpassenListe(was) {
     var s = was === 'nav' ? navOrdnung() : kartenOrdnung();
     var name = was === 'nav' ? function (id) { return BEREICH_NAME[id]; } : function (id) { return KARTEMAP[id].n; };
-    var fest = was === 'nav' ? ['uebersicht'] : [];
+    var fest = [], start = was === 'nav' ? sichtbareBereiche()[0] : null;
     var h = '<ul class="anpassen">';
     s.order.forEach(function (id, i) {
       var an = s.aus.indexOf(id) < 0, istFest = fest.indexOf(id) >= 0;
       h += '<li class="' + (an ? '' : 'aus') + '">' +
         '<label class="schalter"><input type="checkbox" data-anp="' + was + '" data-id="' + id + '"' + (an ? ' checked' : '') + (istFest ? ' disabled' : '') + '><i></i></label>' +
-        '<span class="anpname">' + esc(name(id)) + (was === 'nav' && an && sichtbareBereiche().indexOf(id) >= 4 ? ' <small>unter „Mehr“</small>' : '') + '</span>' +
-        '<button class="btn small" data-act="anp-hoch" data-was="' + was + '" data-id="' + id + '"' + (i === 0 || istFest || (was === 'nav' && i === 1) ? ' disabled' : '') + ' aria-label="nach oben">↑</button>' +
+        '<span class="anpname">' + esc(name(id)) + (id === start ? ' <span class="pill">Start</span>' : '') + (was === 'nav' && an && sichtbareBereiche().indexOf(id) >= 4 ? ' <small>unter „Mehr“</small>' : '') + '</span>' +
+        '<button class="btn small" data-act="anp-hoch" data-was="' + was + '" data-id="' + id + '"' + (i === 0 || istFest ? ' disabled' : '') + ' aria-label="nach oben">↑</button>' +
         '<button class="btn small" data-act="anp-runter" data-was="' + was + '" data-id="' + id + '"' + (i === s.order.length - 1 || istFest ? ' disabled' : '') + ' aria-label="nach unten">↓</button></li>';
     });
     h += '</ul>';
-    if (was === 'nav') h += '<p class="muted small">Auf dem Handy erscheinen die ersten vier sichtbaren Bereiche unten, alle weiteren unter „Mehr“. Einstellungen erreichst du immer über ⚙ oben.</p>';
+    if (was === 'nav') h += '<p class="muted small">Der oberste sichtbare Bereich öffnet sich beim Start. Auf dem Handy stehen die ersten vier unten, alle weiteren unter „Mehr“. Einstellungen erreichst du immer über ⚙ oben.</p>';
     else h += '<p class="muted small">Ausgeblendete Karten kannst du hier jederzeit wieder einschalten.</p>';
     return h;
   }
@@ -624,15 +623,29 @@
     var s = was === 'nav' ? navOrdnung() : kartenOrdnung(), i = s.order.indexOf(id);
     if (aktion === 'hoch' && i > 0) { s.order.splice(i, 1); s.order.splice(i - 1, 0, id); }
     if (aktion === 'runter' && i < s.order.length - 1) { s.order.splice(i, 1); s.order.splice(i + 1, 0, id); }
-    if (aktion === 'an') { s.aus = s.aus.filter(function (x) { return x !== id; }); if (!wert) s.aus.push(id); }
+    if (aktion === 'an') {
+      if (!wert && was === 'nav' && s.order.filter(function (x) { return s.aus.indexOf(x) < 0; }).length <= 1) { toast('Mindestens ein Bereich bleibt sichtbar'); var body0 = $('#anp-body'); if (body0) body0.innerHTML = anpassenListe(was); render(); return; }
+      s.aus = s.aus.filter(function (x) { return x !== id; }); if (!wert) s.aus.push(id);
+    }
     save();
     var body = $('#anp-body'); if (body && $('#dlg').open) body.innerHTML = anpassenListe(was);
   }
 
   // Gemeinsame Bausteine für ruhige, tabellenarme Darstellung
   function wbr(t) { return String(t).replace(/\//g, '/<wbr>'); }
-  function info(text) { return '<details class="info"><summary aria-label="Erklärung" title="Erklärung">i</summary><div class="infotext">' + text + '</div></details>'; }
-  function kopf(titel, infotext) { return '<div class="khead"><h2>' + titel + '</h2>' + (infotext ? info(infotext) : '') + '</div>'; }
+  var INFOS = {};
+  function info(text, titel) {
+    var k = 'i' + String(text).split('').reduce(function (a, c) { return (a * 31 + c.charCodeAt(0)) | 0; }, 7).toString(36);
+    INFOS[k] = { t: text, h: titel || 'Erklärung' };
+    return '<button type="button" class="infoknopf" data-act="info" data-k="' + k + '" aria-label="Erklärung" title="Erklärung">i</button>';
+  }
+  function infoBlatt(k) {
+    var e = INFOS[k]; if (!e) return;
+    var dlg = $('#dlg'); dlg.className = 'blatt'; dlg.onclose = null; delete dlg.dataset.blatt;
+    dlg.innerHTML = '<div class="blattgriff"></div><div class="dhead"><h2>' + esc(e.h) + '</h2><button class="x" data-act="dlg-zu" aria-label="Schließen">×</button></div><div class="dbody infoblatt"><p>' + e.t + '</p></div>';
+    if (!dlg.open) dlg.showModal();
+  }
+  function kopf(titel, infotext, infotitel) { return '<div class="khead"><h2>' + titel + '</h2>' + (infotext ? info(infotext, infotitel || String(titel).replace(/<[^>]+>/g, '')) : '') + '</div>'; }
   function zliste(zeilen) {
     return '<div class="zliste">' + zeilen.filter(Boolean).map(function (z) {
       return '<div class="zrow ' + (z[2] || '') + '"><span>' + z[0] + '</span><b>' + z[1] + '</b></div>';
@@ -708,7 +721,13 @@
   }
   function zuSeite(k) {
     var pg = $('#pager'), ids = sichtbareBereiche();
-    ui.tab = k; history.replaceState(null, '', '#' + k);
+    var vonSeite = ids.indexOf(ui.tab) >= 0, zuUnterseite = ids.indexOf(k) < 0;
+    ui.tab = k;
+    // Einstellungen und ausgeblendete Bereiche wirken wie Unterseiten: Zurück führt zur vorherigen Seite
+    // Kommt der Wechsel aus einem gerade geschlossenen Blatt (z. B. „Mehr“), dessen Verlaufseintrag weiterverwenden
+    if (history.state && history.state.fk === 'blatt' && !$('#dlg').open) history.replaceState({ fk: vonSeite && zuUnterseite ? 'unterseite' : 'seite' }, '', '#' + k);
+    else if (vonSeite && zuUnterseite) history.pushState({ fk: 'unterseite' }, '', '#' + k);
+    else history.replaceState(history.state, '', '#' + k);
     if (pg && seitenModus()) {
       ui.springen = true; clearTimeout(ui.springT); ui.springT = setTimeout(function () { ui.springen = false; }, 700);
       navSync();
@@ -1641,7 +1660,7 @@
     var vzOffen = A.vzOffen.est + A.vzOffen.soli + A.vzOffen.kist;
 
     // Ergebnis
-    h += '<div class="card hero">' + kopf('Voraussichtlich', 'Einkommensteuer, Solidaritätszuschlag und Kirchensteuer auf Basis deiner Hochrechnung. ' + tarifInfo + ' Orientierungsrechnung, keine Steuerberatung; Kapitalerträge sind nicht enthalten.') +
+    h += '<div class="card hero">' + kopf('Voraussichtlich', 'Einkommensteuer, Solidaritätszuschlag und Kirchensteuer auf Basis deiner Hochrechnung. ' + tarifInfo + ' Orientierungsrechnung, keine Steuerberatung; Kapitalerträge sind nicht enthalten.', 'Wie die Steuer berechnet wird') +
       '<div class="gross">' + eur(R.gesamt) + '</div>' +
       '<div class="pills"><span>Ø-Satz <b>' + pct(R.durchschnitt, 0) + '</b></span><span>Grenzsatz <b>' + pct(R.grenz, 0) + '</b></span><span>zvE <b>' + eur(R.zvE) + '</b></span></div>' +
       '<div class="stats">' +
@@ -2100,6 +2119,7 @@
       case 'schema': D.settings.schema = a.dataset.v; darstellungAnwenden(); save(); break;
       case 'akzent': D.settings.akzent = a.dataset.v; darstellungAnwenden(); save(); break;
       case 'karte-blatt': karteBlatt(a.dataset.k); break;
+      case 'info': e.preventDefault(); e.stopPropagation(); infoBlatt(a.dataset.k); break;
       case 'mehr-blatt': mehrBlatt(); break;
       case 'anpassen': anpassenDialog(a.dataset.was); break;
       case 'anp-hoch': anpassenAendern(a.dataset.was, a.dataset.id, 'hoch'); break;
@@ -2270,8 +2290,27 @@
     if (VIEWS[t] && t !== ui.tab) { ui.tab = t; render(); }
   });
 
+
+  // ---------------------------------------------------------------- Zurück-Taste (Android) wie in „Dein Leben“
+  // Jedes geöffnete Fenster/Blatt bekommt einen Verlaufseintrag; Zurück schließt es zuerst.
+  (function () {
+    var dlg = $('#dlg'), zeigen = dlg.showModal.bind(dlg), ignor = 0;
+    dlg.showModal = function () { var war = dlg.open; zeigen(); if (!war) history.pushState({ fk: 'blatt' }, '', location.href); };
+    dlg.addEventListener('close', function () {
+      if (dlg.__perZurueck) { dlg.__perZurueck = false; return; }
+      if (history.state && history.state.fk === 'blatt') { ignor++; history.back(); }
+    });
+    window.addEventListener('popstate', function () {
+      if (ignor) { ignor--; return; }
+      if (dlg.open) { dlg.__perZurueck = true; dlg.close(); return; }
+      var t = location.hash.replace('#', '');
+      if (VIEWS[t] && t !== ui.tab) { ui.tab = t; render(); }
+    });
+  })();
   // ---------------------------------------------------------------- Start
   darstellungAnwenden();
+  if (!location.hash.replace('#', '')) ui.tab = sichtbareBereiche()[0] || 'uebersicht';
+  history.replaceState({ fk: 'start' }, '', location.pathname + location.search + '#' + ui.tab);
   render();
   if (/[?&]aktion=zuordnen/.test(location.search)) { history.replaceState(null, '', location.pathname + location.hash); setTimeout(ritualStart, 300); }
   if (hatFS) {

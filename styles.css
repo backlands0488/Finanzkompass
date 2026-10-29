@@ -777,3 +777,10 @@ nav.tabs button[aria-current="page"] { background: var(--surface); color: var(--
 .antworten { align-items: start; }
 .card.hero > .khead h2 { font-size: var(--f-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
 .card.hero > .khead { margin-bottom: 2px; }
+
+/* v1.9: Erklärungen als Blatt */
+.infoknopf { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1.5px solid var(--ink-3); background: transparent; color: var(--ink-3); font: italic 600 12px/1 Georgia, serif; cursor: pointer; flex: none; vertical-align: middle; margin: 0 2px; }
+.infoknopf:hover { background: var(--surface-2); }
+.khead .infoknopf { width: 28px; height: 28px; font-size: 14px; }
+.infoblatt p { margin: 0 0 8px; font-size: var(--f-m); line-height: 1.55; color: var(--ink-2); }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--ink); margin-left: 6px; vertical-align: 1px; }
