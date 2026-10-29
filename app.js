@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.5.0';
+  var APP_VERSION = '1.6.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -630,6 +630,7 @@
   }
 
   // Gemeinsame Bausteine für ruhige, tabellenarme Darstellung
+  function wbr(t) { return String(t).replace(/\//g, '/<wbr>'); }
   function info(text) { return '<details class="info"><summary aria-label="Erklärung" title="Erklärung">i</summary><div class="infotext">' + text + '</div></details>'; }
   function kopf(titel, infotext) { return '<div class="khead"><h2>' + titel + '</h2>' + (infotext ? info(infotext) : '') + '</div>'; }
   function zliste(zeilen) {
@@ -654,21 +655,77 @@
     $('#jahr').innerHTML = ys.map(function (y) { return '<option' + (y === ui.jahr ? ' selected' : '') + '>' + y + '</option>'; }).join('');
   }
 
+  // Auf dem Handy liegen die Bereiche der Leiste nebeneinander und rasten beim Wischen ein
+  // (natives Scroll-Snapping wie in „Dein Leben“: folgt dem Finger, flüssig wie eine native App).
+  function seitenModus() { return schmal() && sichtbareBereiche().indexOf(ui.tab) >= 0; }
+  ui.scroll = {};
+  function seitenScrollMerken() {
+    $$('#pager .page').forEach(function (p) { ui.scroll[p.dataset.seite] = p.scrollTop; });
+  }
   function render() {
     var ae = document.activeElement;
     var fokus = ae && ae.dataset ? (ae.dataset.bind || ae.id || null) : null;
-    var scroll = window.scrollY;
-    navRendern(); jahreRendern(); statusAnzeigen();
     var m = $('#main');
-    var f = VIEWS[ui.tab] || VIEWS.uebersicht;
-    m.innerHTML = f();
+    navRendern(); jahreRendern(); statusAnzeigen();
+    if (seitenModus()) {
+      seitenScrollMerken();
+      var ids = sichtbareBereiche();
+      document.body.classList.add('paged');
+      kopfHoehe();
+      m.innerHTML = '<div class="pager" id="pager">' + ids.map(function (k) {
+        return '<section class="page" data-seite="' + k + '"><div class="pageinhalt">' + VIEWS[k]() + '</div></section>';
+      }).join('') + '</div>';
+      var pg = $('#pager');
+      ui.springen = true;
+      pg.scrollLeft = ids.indexOf(ui.tab) * pg.clientWidth;
+      $$('.page', pg).forEach(function (p) { p.scrollTop = ui.scroll[p.dataset.seite] || 0; });
+      setTimeout(function () { ui.springen = false; }, 60);
+    } else {
+      var scroll = window.scrollY;
+      document.body.classList.remove('paged');
+      m.innerHTML = (VIEWS[ui.tab] || VIEWS.uebersicht)();
+      window.scrollTo(0, scroll);
+    }
     if (fokus) {
       var el = $('[data-bind="' + fokus + '"]', m) || document.getElementById(fokus);
       if (el && el !== document.body) { try { el.focus({ preventScroll: true }); } catch (e) { /* ignorieren */ } }
     }
-    window.scrollTo(0, scroll);
     bindCharts();
   }
+  function kopfHoehe() { var t = $('.topbar'); if (t) document.documentElement.style.setProperty('--kopf', t.offsetHeight + 'px'); }
+  // Leiste ohne Neuaufbau an die aktuelle Seite anpassen
+  function navSync() {
+    var vis = sichtbareBereiche(), rest = vis.slice(4);
+    $$('#tabs [data-tab]').forEach(function (b) { if (b.dataset.tab === ui.tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    var mehr = $('#tabs [data-act=mehr-blatt]');
+    if (mehr) { if (rest.indexOf(ui.tab) >= 0) mehr.setAttribute('aria-current', 'page'); else mehr.removeAttribute('aria-current'); }
+  }
+  function zuSeite(k) {
+    var pg = $('#pager'), ids = sichtbareBereiche();
+    ui.tab = k; history.replaceState(null, '', '#' + k);
+    if (pg && seitenModus()) {
+      ui.springen = true; clearTimeout(ui.springT); ui.springT = setTimeout(function () { ui.springen = false; }, 700);
+      navSync();
+      var ziel = ids.indexOf(k) * pg.clientWidth;
+      if (Math.abs(pg.scrollLeft - ziel) < 2) { var p = $('.page[data-seite="' + k + '"]'); if (p) p.scrollTo({ top: 0, behavior: 'smooth' }); }
+      else pg.scrollTo({ left: ziel, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      return;
+    }
+    render(); window.scrollTo(0, 0);
+  }
+  // Aktive Seite aus der Scrollposition ableiten (ohne Neuaufbau)
+  document.addEventListener('scroll', function (e) {
+    var pg = e.target; if (!pg || pg.id !== 'pager' || ui.springen) return;
+    var k = sichtbareBereiche()[Math.round(pg.scrollLeft / pg.clientWidth)];
+    if (k && k !== ui.tab) { ui.tab = k; history.replaceState(null, '', '#' + k); navSync(); }
+  }, true);
+  document.addEventListener('scrollend', function (e) { if (e.target && e.target.id === 'pager') ui.springen = false; }, true);
+  var warSchmal = schmal();
+  window.addEventListener('resize', function () {
+    kopfHoehe();
+    if (schmal() !== warSchmal) { warSchmal = schmal(); render(); return; }
+    var pg = $('#pager'); if (pg && !ui.springen) pg.scrollLeft = sichtbareBereiche().indexOf(ui.tab) * pg.clientWidth;
+  });
 
   // ---------------------------------------------------------------- Bausteine
   function tile(label, wert, sub, cls) {
@@ -1111,9 +1168,9 @@
       tile('Noch zu zahlen', eur(A.nochZuZahlen), 'Vorauszahlungen + Nachzahlung') +
       tile('Rücklage pro Monat', eur(A.ruecklageMonat), A.monateRest + ' Monat(e) bis Jahresende') + '</div>';
     var zeilen = [['<b>Betriebseinnahmen</b>', A.I.ein, A.P.ein, 'sum']];
-    katsIn('praxis_ein').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) zeilen.push([k.name, i, p, 'sub']); });
+    katsIn('praxis_ein').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) zeilen.push([wbr(esc(k.name)), i, p, 'sub']); });
     zeilen.push(['<b>Betriebsausgaben</b>', -A.I.aus, -A.P.aus, 'sum']);
-    katsIn('praxis_aus').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) zeilen.push([k.name, i, p, 'sub']); });
+    katsIn('praxis_aus').forEach(function (k) { var i = A.ist[k.id] || 0, p = A.prog[k.id] || 0; if (i || p) zeilen.push([wbr(esc(k.name)), i, p, 'sub']); });
     zeilen.push(['Abschreibungen (AfA/GWG)', -A.I.afa, -A.P.afa, 'sub']);
     if (A.pausch) zeilen.push(['Pauschalen (nicht kontowirksam)', -A.I.pausch, -A.P.pausch, 'sub']);
     zeilen.push(['<b>Steuerlicher Gewinn</b>', A.I.gewinn, A.P.gewinn, 'sum']);
@@ -1675,7 +1732,7 @@
         var gname = GRUPPEN.filter(function (x) { return x.id === g; })[0].name;
         var felder = katsIn(g).map(function (k) {
           var i = A.ist[k.id] || 0, lin = A.t > 0.04 ? i / A.t : i, mv = (H.manuell[Y] || {})[k.id];
-          return '<label class="fz"><span>' + esc(k.name) + '<small>bisher ' + eur(Math.abs(i)) + ' · linear ' + eur(Math.abs(lin)) + '</small></span><input type="number" step="1" inputmode="decimal" data-bind="hochrechnung.manuell.' + Y + '.' + k.id + '" value="' + (mv === 0 || mv ? mv : '') + '" placeholder="' + Math.round(Math.abs(lin)) + '"></label>';
+          return '<label class="fz"><span>' + wbr(esc(k.name)) + '<small>bisher ' + eur(Math.abs(i)) + ' · linear ' + eur(Math.abs(lin)) + '</small></span><input type="number" step="1" inputmode="decimal" data-bind="hochrechnung.manuell.' + Y + '.' + k.id + '" value="' + (mv === 0 || mv ? mv : '') + '" placeholder="≈ ' + Math.round(Math.abs(lin)).toLocaleString('de-DE') + '"></label>';
         }).join('');
         hr += '<details class="mehr innen" data-auf="hm-' + g + '"' + (ui.offen['hm-' + g] ? ' open' : '') + '><summary><span>' + esc(gname) + '</span></summary><div class="mehrinhalt"><div class="fzgruppe">' + felder + '</div></div></details>';
       });
@@ -1920,7 +1977,7 @@
   document.addEventListener('click', function (e) {
     var tab = e.target.closest('[data-tab]');
     if (tab && $('#dlg').open && $('#dlg').contains(tab)) $('#dlg').close();
-    if (tab) { ui.tab = tab.dataset.tab; history.replaceState(null, '', '#' + ui.tab); render(); window.scrollTo(0, 0); return; }
+    if (tab) { zuSeite(tab.dataset.tab); return; }
     var a = e.target.closest('[data-act]');
     if (!a) return;
     var act = a.dataset.act;
@@ -1958,7 +2015,7 @@
       case 'anp-hoch': anpassenAendern(a.dataset.was, a.dataset.id, 'hoch'); break;
       case 'anp-runter': anpassenAendern(a.dataset.was, a.dataset.id, 'runter'); break;
       case 'wohin': ui.wohin = a.dataset.v; render(); break;
-      case 'zeige-kat': ui.tab = 'buchungen'; ui.filter.kat = a.dataset.k; ui.filter.monat = ''; ui.filter.suche = ''; history.replaceState(null, '', '#buchungen'); render(); window.scrollTo(0, 0); break;
+      case 'zeige-kat': ui.filter.kat = a.dataset.k; ui.filter.monat = ''; ui.filter.suche = ''; ui.scroll.buchungen = 0; ui.tab = 'buchungen'; history.replaceState(null, '', '#buchungen'); render(); window.scrollTo(0, 0); break;
       case 'sz-jahr': ui.szJahr = +a.dataset.y; render(); break;
       case 'regeln-zeigen': ui.regelAlle = true; render(); break;
       case 'ritual': ritualStart(); break;

@@ -563,3 +563,41 @@ details.weitere > summary { font-size: 13px; color: var(--accent); margin: 6px 0
 
 .gt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .gt details.info[open] { flex-basis: 100%; }
+
+/* ---------- v1.6: Wischen zwischen Bereichen (Handy) ---------- */
+body.paged { overflow: hidden; height: 100dvh; }
+body.paged .layout { display: block; min-height: 0; }
+body.paged main { padding: 0; max-width: none; overflow: hidden; }
+.pager { display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; height: calc(100dvh - var(--kopf, 57px)); scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.pager::-webkit-scrollbar { display: none; }
+.page { flex: 0 0 100%; width: 100%; min-width: 0; scroll-snap-align: start; scroll-snap-stop: always; overflow-y: auto; overflow-x: hidden; overscroll-behavior-y: contain; }
+.pageinhalt { padding: 16px 16px calc(96px + env(safe-area-inset-bottom)); }
+.jahrchips, .tablewrap { overscroll-behavior-x: contain; }
+
+/* Nichts darf die Seite seitlich verschiebbar machen */
+.layout { overflow-x: clip; }
+main { min-width: 0; }
+
+/* EÜR: feste, bündige Zahlenspalten */
+.zliste.drei .zrow { grid-template-columns: minmax(0, 1fr) 92px 92px; gap: 10px; align-items: start; }
+.zliste.drei .zrow > span { overflow-wrap: anywhere; hyphens: auto; }
+.zliste.drei .zrow > b { min-width: 0; text-align: right; }
+@media (max-width: 420px) {
+  .zliste.drei .zrow { grid-template-columns: minmax(0, 1fr) 80px 80px; gap: 8px; font-size: 13.5px; }
+  .zliste.drei .zrow.sub > span { padding-left: 8px; font-size: 13px; }
+}
+
+/* Eingabezeilen: Feld immer bündig rechts, lange Namen brechen um */
+label.fz { display: grid; grid-template-columns: minmax(0, 1fr) 124px; align-items: center; gap: 12px; }
+label.fz > span { min-width: 0; overflow-wrap: anywhere; hyphens: auto; }
+label.fz input { width: 100%; }
+label.fz input::placeholder { color: var(--ink-3); font-style: italic; opacity: .8; }
+@media (max-width: 420px) { label.fz { grid-template-columns: minmax(0, 1fr) 112px; } }
+
+/* Anpassen-Fenster: passt immer in die Breite */
+@media (max-width: 760px) {
+  dialog.blatt { width: 100%; max-width: 100%; left: 0; right: 0; margin: auto 0 0 0; }
+}
+ul.anpassen li { min-width: 0; }
+.anpname { min-width: 0; overflow-wrap: anywhere; }
+ul.anpassen .btn.small { padding: 6px 10px; flex: none; }
