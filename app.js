@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.10.1';
+  var APP_VERSION = '1.10.2';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -1916,6 +1916,7 @@
     h += gruppeKarte('e-loeschen', 'Löschen', '',
       '<p class="muted small">„Alle Buchungen löschen“ behält Regeln, Steuerangaben, KVN und Planung – ein neuer Import ordnet dann wieder zu. Einzelne Buchungen löschst du unter Buchungen → Auswählen.</p>' +
       '<div class="btns"><button class="btn danger" data-act="loeschen-alle"' + (D.buchungen.length ? '' : ' disabled') + '>Alle Buchungen löschen (' + D.buchungen.length + ')</button><button class="btn danger" data-act="reset">Alle Daten in diesem Browser löschen</button></div>');
+    h += '<p class="versionfuss">Finanzkompass · Version ' + APP_VERSION + '</p>';
     return h;
   }
 

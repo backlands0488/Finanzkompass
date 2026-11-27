@@ -788,3 +788,6 @@ nav.tabs button[aria-current="page"] { background: var(--surface); color: var(--
 /* v1.10: Sicherung */
 .sicherung-wann { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 2px 0 10px; }
 .sicherung-wann small { font-size: var(--f-s); font-weight: 500; color: var(--ink-3); margin-left: 4px; }
+
+/* v1.10.2 – Versionsangabe am Ende der Einstellungen */
+.versionfuss { text-align: center; color: var(--ink-3); font-size: 12px; margin: 28px 0 8px; letter-spacing: .02em; }
