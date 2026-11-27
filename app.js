@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.10.2';
+  var APP_VERSION = '1.11.0';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -1090,47 +1090,108 @@
   }
 
   // Wiederkehrende Zahlungen erkennen (Abstand und Häufigkeit; ähnlich der Vertragserkennung in Finanz-Apps)
+  // ---------------------------------------------------------------- Regelmäßige Zahlungen erkennen
+  // Gleicher Zahlungspartner wird auch erkannt, wenn die Bank den Namen anders schreibt
+  // (GROSS/klein, Adresse, Rechtsform, PayPal-Händler aus dem Verwendungszweck).
+  var PARTNER_STOPP = { deutsche: 1, deutschland: 1, die: 1, der: 1, das: 1, dr: 1, herr: 1, frau: 1, gmbh: 1, ag: 1, se: 1, ev: 1, kg: 1, und: 1, 'für': 1, sa: 1, sarl: 1, et: 1, cie: 1, sca: 1 };
+  var MONATSNAMEN = ['januar', 'februar', 'märz', 'april', 'mai', 'juni', 'juli', 'august', 'september', 'oktober', 'november', 'dezember'];
+  function partnerName(b) {
+    var n = String(b.gegenpartei || b.iban || '').split('\n')[0].replace(/\s{2,}/g, ' ').trim();
+    if (/^paypal/i.test(n)) { var m = /PP\.\d+\.PP\/\.\s*(.+?)(?:,| - |$)/i.exec(String(b.text || '').replace(/\n/g, ' ')); if (m) n = m[1].trim(); }
+    return n;
+  }
+  function partnerSchluessel(n) {
+    var t = n.toLowerCase().replace(/[^a-zäöüß]+/g, ' ').trim().split(' ').filter(function (w) { return w.length > 1 && !PARTNER_STOPP[w]; });
+    return t[0] || n.toLowerCase();
+  }
+  function schluesselPasst(x, y) {
+    if (x === y) return true;
+    var k = x.length < y.length ? x : y, l = k === x ? y : x;
+    return k.length >= 5 && l.indexOf(k) === 0;
+  }
+  // Lage eines Datums: Bezugsmonat (Zahlungen kurz vor Monatsende zählen zum Folgemonat) und Tagesversatz
+  function zahlLage(iso) {
+    var y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1, d = +iso.slice(8, 10), L = new Date(y, m + 1, 0).getDate();
+    if (d > L - 4) return { a: y * 12 + m + 1, o: d - L - 1 };
+    return { a: y * 12 + m, o: d - 1 };
+  }
+  function lageDatum(a, o) { return new Date(Math.floor(a / 12), a % 12, 1 + o, 12); }
+  function medianOf(a) { var s = a.slice().sort(function (x, y) { return x - y; }), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
   function wiederkehrend() {
-    var gruppen = {}, ref = null;
+    var ref = null;
     D.buchungen.forEach(function (b) { if (!ref || b.datum > ref) ref = b.datum; });
     if (!ref) return [];
-    var refT = new Date(ref + 'T12:00:00').getTime();
-    D.buchungen.forEach(function (b) {
+    var refT = new Date(ref + 'T12:00:00').getTime(), heute = Date.now();
+    var stroeme = [];
+    D.buchungen.slice().sort(function (x, y) { return x.datum < y.datum ? -1 : 1; }).forEach(function (b) {
       var g = gruppe(b.kat);
-      if (!b.kat || ['praxis_aus', 'vorsorge', 'praxis_ein'].indexOf(g) < 0) return;
-      var t = new Date(b.datum + 'T12:00:00').getTime();
-      if (refT - t > 400 * 864e5) return;
-      // Vorzeichen muss zur Kategorie passen (Gutschriften bei Ausgaben-Kategorien zählen nicht als Fixkosten)
-      if ((g === 'praxis_ein') !== (b.betrag > 0)) return;
-      var key = (nameKey(b) || normIBAN(b.iban)) + '|' + b.kat;
-      (gruppen[key] = gruppen[key] || []).push({ b: b, t: t });
+      if (!b.kat || g === 'steuer' || !b.betrag) return;
+      if (refT - new Date(b.datum + 'T12:00:00').getTime() > 400 * 864e5) return;
+      var name = partnerName(b), key = partnerSchluessel(name), vz = b.betrag > 0 ? 1 : -1;
+      // KVN: Abschlag (auch „Abschlag plus“), Restzahlung und TI-Pauschale sind eigene Zahlungsströme
+      var art = b.kat !== 'kvn' ? '' : /restzahlung/i.test(b.text) ? 'rest' : /ti-?pauschale/i.test(b.text) ? 'ti' : /abschlag/i.test(b.text) ? 'ab' : 'x';
+      var s = stroeme.filter(function (x) { return x.kat === b.kat && x.vz === vz && x.art === art && schluesselPasst(x.key, key); })[0];
+      if (!s) { s = { kat: b.kat, vz: vz, art: art, key: key, namen: [], b: [] }; stroeme.push(s); }
+      if (key.length > s.key.length) s.key = key;
+      s.namen.push(name); s.b.push(b);
     });
-    var med = function (a) { var s = a.slice().sort(function (x, y) { return x - y; }); var m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
     var liste = [];
-    Object.keys(gruppen).forEach(function (key) {
-      var e = gruppen[key].sort(function (x, y) { return x.t - y.t; });
-      var monate = {}; e.forEach(function (x) { monate[x.b.datum.slice(0, 7)] = 1; });
-      if (e.length < 3 || Object.keys(monate).length < 3) return;
-      var abst = []; for (var i = 1; i < e.length; i++) abst.push((e[i].t - e[i - 1].t) / 864e5);
-      var mi = Math.max(1, med(abst));
-      var rhythmus = mi <= 20 ? 'mehrmals im Monat' : mi <= 40 ? 'monatlich' : mi <= 105 ? 'vierteljährlich' : mi <= 200 ? 'halbjährlich' : null;
-      if (!rhythmus) return;
-      // nur aktive Zahlungsströme: letzte Zahlung nicht länger als 1,5 Intervalle (mind. 45 Tage) vor dem letzten Kontostand
-      if ((refT - e[e.length - 1].t) / 864e5 > Math.max(45, mi * 1.5)) return;
-      var summe = e.reduce(function (s, x) { return s + x.b.betrag; }, 0);
-      var spanne = (e[e.length - 1].t - e[0].t) / 864e5 + Math.max(mi, 30.44);
-      var proMonat = summe / (spanne / 30.44);
-      var naechst = e[e.length - 1].t, heute = Date.now(), schritt = Math.max(mi, 28) * 864e5;
-      if (mi > 20) { do { naechst += schritt; } while (naechst < heute - 2 * 864e5); } else naechst = null;
-      var letzter = e[e.length - 1].b;
-      liste.push({ name: String(letzter.gegenpartei || letzter.iban || '').split('\n')[0].replace(/\s{2,}/g, ' '), kat: letzter.kat, gruppe: gruppe(letzter.kat),
-        rhythmus: rhythmus, proMonat: proMonat, typisch: med(e.map(function (x) { return x.b.betrag; })), naechst: naechst, n: e.length });
+    stroeme.forEach(function (s) {
+      // Buchungen, die innerhalb von 5 Tagen kommen, sind eine Zahlung (z. B. Miete + Strom, mehrere Rechnungen)
+      var ev = [];
+      s.b.forEach(function (b) {
+        var t = new Date(b.datum + 'T12:00:00').getTime(), e = ev[ev.length - 1];
+        if (e && t - e.t <= 5 * 864e5) { e.betrag += b.betrag; e.texte.push(b.text || ''); }
+        else ev.push({ t: t, datum: b.datum, betrag: b.betrag, texte: [b.text || ''], lage: zahlLage(b.datum) });
+      });
+      var kvnQuartal = s.art === 'rest' || s.art === 'ti';
+      if (ev.length < (kvnQuartal ? 1 : 3)) return;
+      // Von der jüngsten Zahlung rückwärts die gleichmäßige Reihe suchen; einzelne Ausreißer werden übersprungen
+      var reihe = [ev[ev.length - 1]], schritt = kvnQuartal ? 3 : null, ausreisser = 0;
+      for (var i = ev.length - 2; i >= 0 && ausreisser <= reihe.length; i--) {
+        var e = ev[i], nach = reihe[0], diff = nach.lage.a - e.lage.a;
+        var oMed = medianOf(reihe.map(function (x) { return x.lage.o; }));
+        if (Math.abs(e.lage.o - oMed) > 6 || diff <= 0) { ausreisser++; continue; }
+        if (!schritt) { schritt = diff === 2 ? 1 : [1, 3, 6, 12].indexOf(diff) >= 0 ? diff : null; if (!schritt) { ausreisser++; continue; } }
+        if (diff % schritt) { ausreisser++; continue; } // einzelne ausgefallene Monate sind erlaubt
+        reihe.unshift(e);
+      }
+      if (reihe.length < (kvnQuartal ? 1 : 3) || !schritt) return;
+      var letzte = reihe[reihe.length - 1];
+      // aktiv: letzte Zahlung nicht länger als 1,5 Rhythmen vor dem letzten Kontostand
+      if (zahlLage(ref).a - letzte.lage.a > Math.max(1, Math.round(schritt * 1.5))) return;
+      var o = Math.round(medianOf(reihe.slice(-3).map(function (x) { return x.lage.o; })));
+      var a = letzte.lage.a + schritt, naechst = lageDatum(a, o).getTime();
+      while (naechst < heute - 2 * 864e5) { a += schritt; naechst = lageDatum(a, o).getTime(); }
+      var betrag = Math.round(letzte.betrag * 100) / 100, notiz = '', name = s.namen.filter(function (n) { return n !== n.toUpperCase(); }).pop() || s.namen[s.namen.length - 1];
+      if (s.kat === 'kvn') {
+        name = 'KVN';
+        if (s.art === 'ab') {
+          // Abschlag je Monat; im mittleren Quartalsmonat „Abschlag plus“ (37 % statt 24 %, laut KVN-Zahlungsterminen)
+          var monatAus = function (txt) { var m = /abschlag(?: plus)?\s+([a-zäöü]+)/i.exec(txt); return m ? MONATSNAMEN.indexOf(m[1].toLowerCase()) : -1; };
+          var istPlus = function (e) { return e.texte.some(function (t) { return /abschlag plus/i.test(t); }); };
+          var normal = reihe.filter(function (e) { return !istPlus(e); }), plusMon = {};
+          reihe.forEach(function (e) { if (istPlus(e)) { var mm = monatAus(e.texte.join(' ')); if (mm >= 0) plusMon[mm % 3] = 1; } });
+          var lm = monatAus(letzte.texte.join(' ')), nm = lm >= 0 ? (lm + (a - letzte.lage.a)) % 12 : -1;
+          var basis = normal.length ? normal[normal.length - 1].betrag : betrag;
+          if (nm >= 0 && plusMon[nm % 3]) { betrag = Math.round(basis * 37 / 24 / 100) * 100; notiz = 'Abschlag plus ' + MONATSNAMEN[nm].replace(/^./, function (c) { return c.toUpperCase(); }) + ' · geschätzt'; }
+          else { betrag = basis; notiz = 'Abschlag' + (nm >= 0 ? ' ' + MONATSNAMEN[nm].replace(/^./, function (c) { return c.toUpperCase(); }) : ''); }
+        } else if (s.art === 'rest') { notiz = 'Restzahlung · Betrag laut Honorarbescheid'; betrag = null; }
+        else if (s.art === 'ti') { notiz = 'TI-Pauschale'; }
+        else return;
+      }
+      var rhythmus = schritt === 1 ? 'monatlich' : schritt === 3 ? 'vierteljährlich' : schritt === 6 ? 'halbjährlich' : schritt === 12 ? 'jährlich' : 'alle ' + schritt + ' Monate';
+      var mittel = reihe.slice(-3).reduce(function (x, e) { return x + e.betrag; }, 0) / Math.min(3, reihe.length);
+      name = name.replace(/\s+(GmbH|AG|SE|KG|Aktiengesellschaft|Limited|Ltd\.?|e\.\s?V\.|S\.a\.r\.l\.)(\s.*)?$/i, '').trim() || name;
+      liste.push({ name: name, kat: s.kat, gruppe: gruppe(s.kat), art: s.art, rhythmus: rhythmus, notiz: notiz,
+        proMonat: mittel / schritt, typisch: betrag, naechst: naechst, n: reihe.length });
     });
     return liste.sort(function (a, b) { return Math.abs(b.proMonat) - Math.abs(a.proMonat); });
   }
 
   function karteFixkosten(A) {
-    var w = wiederkehrend().filter(function (x) { return x.proMonat < 0; });
+    var w = wiederkehrend().filter(function (x) { return x.proMonat < 0 && (x.gruppe === 'praxis_aus' || x.gruppe === 'vorsorge'); });
     if (!w.length) return '';
     var praxis = w.filter(function (x) { return x.gruppe === 'praxis_aus'; }), vors = w.filter(function (x) { return x.gruppe === 'vorsorge'; });
     var sum = function (l) { return -l.reduce(function (s, x) { return s + x.proMonat; }, 0); };
@@ -1163,23 +1224,33 @@
     } else if (plan(D.steuer[ny])) { vzB = -plan(D.steuer[ny]) / 4; vzS = 'ESt, Soli, KiSt'; }
     else if (plan(D.steuer[A.Y])) { vzB = -plan(D.steuer[A.Y]) / 4; vzS = 'geschätzt wie ' + A.Y + ' · neuen Bescheid unter Steuer eintragen'; }
     items.push({ d: nt, t: 'Steuer-Vorauszahlung', s: vzS, b: vzB, cls: 'steuer' });
-    // Erwartete Zahlungen aus wiederkehrenden Buchungen (nächste 35 Tage)
-    var grenze = Date.now() + 35 * 864e5;
+    // Erwartete Zahlungen aus regelmäßigen Buchungen (nächste 35 Tage)
+    var grenze = Date.now() + 35 * 864e5, erwartet = {};
     wiederkehrend().forEach(function (x) {
       if (!x.naechst || x.naechst > grenze) return;
-      var d = new Date(x.naechst); var iso = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-      items.push({ d: iso, t: x.name, s: 'erwartet · ' + x.rhythmus, b: x.typisch, cls: x.typisch > 0 ? 'ein' : '' });
+      var d = new Date(x.naechst), iso = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+      // gleicher Partner am gleichen Tag → eine Zeile (z. B. KVN Restzahlung + TI-Pauschale)
+      var k = iso + '|' + x.name, e = erwartet[k];
+      if (e) { e.s = e.s.replace(/ · .*$/, '') + ' + ' + (x.notiz || x.rhythmus); if (x.typisch !== null) e.b = (e.b || 0) + x.typisch; return; }
+      e = erwartet[k] = { d: iso, t: x.name, s: x.notiz || (katName(x.kat) + ' · ' + x.rhythmus), b: x.typisch, cls: x.typisch > 0 ? 'ein' : '' };
+      items.push(e);
     });
-    // Steuertermin immer zeigen, dazu die nächsten erwarteten Zahlungen
-    var steuerI = items.shift();
     items.sort(function (a, b) { return a.d < b.d ? -1 : 1; });
-    items = items.slice(0, 5).concat([steuerI]).sort(function (a, b) { return a.d < b.d ? -1 : 1; });
     var tage = function (iso) { var n = Math.round((new Date(iso + 'T12:00:00') - new Date(jetzt + 'T12:00:00')) / 864e5); return n <= 0 ? 'heute' : n === 1 ? 'morgen' : 'in ' + n + ' Tagen'; };
-    var h = '<div class="frage">Demnächst</div><div class="termine">' + items.slice(0, 6).map(function (i) {
+    var zeile = function (i) {
       var p = i.d.split('-');
       return '<div class="termin ' + i.cls + '"><div class="tdatum"><b>' + +p[2] + '</b><span>' + MONATE[+p[1] - 1].toUpperCase() + '</span></div><div class="ttext"><b>' + esc(i.t) + '</b><small>' + tage(i.d) + ' · ' + esc(i.s) + '</small></div>' +
         (i.b !== null ? '<em class="' + (i.b > 0 ? 'pos' : '') + '">' + (i.b > 0 ? '+' : '') + eur(i.b) + '</em>' : '') + '</div>';
-    }).join('') + '</div>';
+    };
+    var ein = 0, aus = 0;
+    items.forEach(function (i) { if (i.b > 0) ein += i.b; else if (i.b < 0) aus += i.b; });
+    // Steuertermin immer sichtbar
+    var sichtbar = items.slice(0, 6), steuerT = items.filter(function (i) { return i.cls === 'steuer'; })[0];
+    if (steuerT && sichtbar.indexOf(steuerT) < 0) sichtbar = items.slice(0, 5).concat([steuerT]);
+    var rest = items.filter(function (i) { return sichtbar.indexOf(i) < 0; });
+    var h = '<div class="frage">Demnächst</div><div class="termine">' + sichtbar.map(zeile).join('') + '</div>';
+    if (rest.length) h += '<details class="weitere"><summary>' + rest.length + ' weitere</summary><div class="termine">' + rest.map(zeile).join('') + '</div></details>';
+    h += '<p class="muted small">Nächste 5 Wochen: <b class="pos">+' + eur(ein) + '</b> · <b>' + eur(aus) + '</b> · erkannt aus deinen regelmäßigen Buchungen</p>';
     return karte('termine', h);
   }
 
@@ -2400,5 +2471,5 @@
     });
   }
   // Test-Haken (nur für automatisierte Prüfung)
-  window.__fk = { auswertung: auswertung, parseBetrag: parseBetrag, parseDatum: parseDatum, splitCSV: splitCSV, szRechne: szRechne, data: function () { return D; } };
+  window.__fk = { auswertung: auswertung, parseBetrag: parseBetrag, parseDatum: parseDatum, splitCSV: splitCSV, szRechne: szRechne, data: function () { return D; }, wiederkehrend: wiederkehrend };
 })();

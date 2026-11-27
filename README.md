@@ -36,7 +36,7 @@ Einnahmen, Ausgaben, Gewinn und Steuer der Praxis. Läuft als installierbare Web
 ## Bedienung
 
 - **Leiste:** unten (Handy) höchstens vier Bereiche plus „Mehr“; Standard Übersicht · Steuer · Planung · KVN. Reihenfolge und Sichtbarkeit unter ⚙ Einstellungen → Leiste anpassen (oder Mehr → Leiste anpassen).
-- **Übersicht:** Karten – Was bleibt mir?, Steuerrücklage, Kurs, Demnächst (Steuertermine nach § 37 EStG und erwartete Zahlungen), Zuordnen, Monatsrückblick, Woher/Wohin, Fixkosten (automatisch erkannte wiederkehrende Zahlungen), Was wäre, wenn …, Details. Über „Übersicht anpassen“ verschieben und ausblenden.
+- **Übersicht:** Karten – Was bleibt mir?, Steuerrücklage, Kurs, Demnächst (Steuertermine nach § 37 EStG mit offenem Rest laut Bescheid; erwartete Zahlungen der nächsten 5 Wochen aus regelmäßigen Buchungen – Partner werden auch bei abweichender Schreibweise erkannt, KVN getrennt nach Abschlag/Abschlag plus/Restzahlung/TI-Pauschale), Zuordnen, Monatsrückblick, Woher/Wohin, Fixkosten (automatisch erkannte wiederkehrende Zahlungen), Was wäre, wenn …, Details. Über „Übersicht anpassen“ verschieben und ausblenden.
 - **Steuer, KVN, Planung:** Ergebnis oben, Eingaben in aufklappbaren Gruppen mit Zusammenfassung; Erklärungen hinter „i“. Szenarien werden Jahr für Jahr bearbeitet.
 
 ## Darstellung, Bedienung, Sicherung
