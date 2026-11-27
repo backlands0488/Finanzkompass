@@ -6,7 +6,7 @@
 
   // ---------------------------------------------------------------- Grundlagen
   var STORE_KEY = 'finanzkompass.v1';
-  var APP_VERSION = '1.10.0';
+  var APP_VERSION = '1.10.1';
   var $ = function (s, el) { return (el || document).querySelector(s); };
   var $$ = function (s, el) { return Array.prototype.slice.call((el || document).querySelectorAll(s)); };
   var esc = function (s) {
@@ -766,6 +766,7 @@
   }
   function setPath(pfad, wert) {
     var teile = pfad.split('.'), o = D;
+    if (teile[0] === 'steuer' && /^\d{4}$/.test(teile[1])) st(+teile[1]); // Steuerjahr vollständig anlegen
     for (var i = 0; i < teile.length - 1; i++) { if (o[teile[i]] == null) o[teile[i]] = {}; o = o[teile[i]]; }
     o[teile[teile.length - 1]] = wert;
   }
@@ -1151,8 +1152,17 @@
     var termine = [], y = heute.getFullYear();
     [y, y + 1].forEach(function (jj) { ['03', '06', '09', '12'].forEach(function (m) { termine.push(jj + '-' + m + '-10'); }); });
     var nt = termine.filter(function (d) { return d >= jetzt; })[0];
-    var S = D.steuer[+nt.slice(0, 4)] || st(A.Y), vz = S && S.vz ? nz(S.vz.est) + nz(S.vz.soli) + nz(S.vz.kist) : 0;
-    items.push({ d: nt, t: 'Steuer-Vorauszahlung', s: vz ? 'ESt, Soli, KiSt' : 'Betrag: Vorauszahlungsbescheid unter Steuer eintragen', b: vz ? -vz / 4 : null, cls: 'steuer' });
+    // Betrag: im laufenden Jahr der laut Buchungen noch offene Rest, verteilt auf die verbleibenden Termine
+    // (ein im Jahr geänderter Bescheid verlagert den Rest oft komplett auf den letzten Termin)
+    var ny = +nt.slice(0, 4), rest = termine.filter(function (d) { return d >= jetzt && +d.slice(0, 4) === ny; }).length;
+    var plan = function (S) { return S && S.vz ? nz(S.vz.est) + nz(S.vz.soli) + nz(S.vz.kist) : 0; };
+    var vzB = null, vzS = 'Betrag: Vorauszahlungsbescheid unter Steuer eintragen';
+    if (ny === A.Y && plan(D.steuer[ny])) {
+      var offen = A.vzOffen.est + A.vzOffen.soli + A.vzOffen.kist;
+      if (offen > 0.5) { vzB = -offen / rest; vzS = 'ESt, Soli, KiSt · Rest laut Bescheid'; } else vzS = 'Laut Buchungen schon bezahlt';
+    } else if (plan(D.steuer[ny])) { vzB = -plan(D.steuer[ny]) / 4; vzS = 'ESt, Soli, KiSt'; }
+    else if (plan(D.steuer[A.Y])) { vzB = -plan(D.steuer[A.Y]) / 4; vzS = 'geschätzt wie ' + A.Y + ' · neuen Bescheid unter Steuer eintragen'; }
+    items.push({ d: nt, t: 'Steuer-Vorauszahlung', s: vzS, b: vzB, cls: 'steuer' });
     // Erwartete Zahlungen aus wiederkehrenden Buchungen (nächste 35 Tage)
     var grenze = Date.now() + 35 * 864e5;
     wiederkehrend().forEach(function (x) {
@@ -1715,10 +1725,16 @@
     }
 
     // Vorauszahlungsbescheid
-    var vzSum = nz(S.vz.est) + nz(S.vz.soli) + nz(S.vz.kist);
-    h += gruppeKarte('st-vz', 'Vorauszahlungsbescheid ' + info('Jahressummen laut Bescheid für ' + Y + '. Fällig je ein Viertel am 10. März, Juni, September und Dezember (§ 37 EStG). Was schon bezahlt ist, liest die App aus den Buchungen.'),
-      vzSum ? eur(vzSum) + ' im Jahr · ' + eur(vzSum / 4) + ' je Quartal' : 'noch nicht eingetragen',
-      '<div class="fzgruppe">' + feldZeile(p + '.vz.est', S.vz.est, 'Einkommensteuer (Jahr)') + feldZeile(p + '.vz.soli', S.vz.soli, 'Soli (Jahr)') + feldZeile(p + '.vz.kist', S.vz.kist, 'Kirchensteuer (Jahr)') + '</div>');
+    var vzSum = nz(S.vz.est) + nz(S.vz.soli) + nz(S.vz.kist), vzOff = A.vzOffen.est + A.vzOffen.soli + A.vzOffen.kist;
+    var NY = Y + 1, SN = D.steuer[NY] && D.steuer[NY].vz ? D.steuer[NY].vz : { est: 0, soli: 0, kist: 0 }, nSum = nz(SN.est) + nz(SN.soli) + nz(SN.kist);
+    var aktuellesJahr = Y === new Date().getFullYear();
+    var vzZus = !vzSum ? 'noch nicht eingetragen'
+      : (aktuellesJahr && vzOff > 0.5 ? 'Noch offen ' + eur(vzOff) : eur(vzSum) + ' im Jahr') + (aktuellesJahr && nSum ? ' · ab ' + NY + ' ' + eur(nSum / 4) + ' je Quartal' : '');
+    h += gruppeKarte('st-vz', 'Vorauszahlungsbescheid ' + info('Jahressummen laut Bescheid. Fällig am 10. März, Juni, September und Dezember (§ 37 EStG). Ändert das Finanzamt den Bescheid im Lauf des Jahres, verteilt sich der Rest auf die verbleibenden Termine. Was schon bezahlt ist, liest die App aus den Buchungen.'),
+      vzZus,
+      '<div class="fzgruppe">' + feldZeile(p + '.vz.est', S.vz.est, 'Einkommensteuer ' + Y) + feldZeile(p + '.vz.soli', S.vz.soli, 'Soli ' + Y) + feldZeile(p + '.vz.kist', S.vz.kist, 'Kirchensteuer ' + Y) + '</div>' +
+      (aktuellesJahr ? '<p class="muted small">Steht im Bescheid schon ein Betrag für ' + NY + ' („' + NY + ' und weitere Jahre“), hier die Jahressumme, also das Vierfache:</p><div class="fzgruppe">' +
+        feldZeile('steuer.' + NY + '.vz.est', SN.est, 'Einkommensteuer ' + NY) + feldZeile('steuer.' + NY + '.vz.soli', SN.soli, 'Soli ' + NY) + feldZeile('steuer.' + NY + '.vz.kist', SN.kist, 'Kirchensteuer ' + NY) + '</div>' : ''));
 
     // Steuerzahlungen
     var stb = D.buchungen.filter(function (b) { return gruppe(b.kat) === 'steuer' && (jahrVon(b) === Y || +b.datum.slice(0, 4) === Y); })
